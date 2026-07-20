@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+requests
+pydantic
+langgraph
+langchain
+langchain-upstage
+supabase
+chromadb
+pykrx
