@@ -28,11 +28,15 @@ Out of scope (explicitly excluded):
    run, CI/CD skeleton. Done when `docker compose up --build` serves a clickable chart with a
    mock AI panel.
 2. **M1 — Real market data**: replace `market_data_service.py`'s generator with a real price
-   data source (see `scripts/prepare_market_data.py` for where a real fetch would plug in).
+   data source. `pykrx` is already listed in the root `requirements.txt` as the intended
+   source; `data/step1_corpcode.py` / `data/step2_disclosures.py` already fetch real DART
+   corp codes and disclosures for the sample tickers (run manually, requires `DART_API_KEY`).
 3. **M2 — Real retrieval**: replace `retrieval_service.py` with an actual document
-   store/search (see `scripts/ingest_documents.py` and `data/samples/documents/`).
-4. **M3 — Real LLM**: wire `llm_service.py` to SOLAR or Gemini using `app/prompts/explain_movement.txt`,
-   gated by `LLM_PROVIDER`.
+   store/search over the disclosures `step2_disclosures.py` fetches — `chromadb` is already
+   listed in the root `requirements.txt` for this.
+4. **M3 — Real LLM**: wire `llm_service.py` to SOLAR (via `langchain-upstage`) or Gemini using
+   `app/prompts/explain_movement.txt`, gated by `LLM_PROVIDER`. `backend/app/agent/` holds an
+   early LangGraph skeleton (`state.py`/`nodes.py`/`graph.py`, currently TODO stubs) for this.
 5. **M4 — GCP deployment**: complete the one-time setup in `infra/gcp-setup.md`, then let
    `.github/workflows/deploy.yml` run for real.
 

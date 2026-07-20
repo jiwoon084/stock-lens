@@ -1,0 +1,18 @@
+# Target dependency set for the real (non-mock) integration roadmap in
+# docs/project-plan.md (M1 real market data / M2 real retrieval / M3 real LLM).
+# Not installed by CI and not required to run the current mock boilerplate —
+# see backend/requirements.txt for what's actually used today.
+# `requests` + `python-dotenv` are used now by data/step1_corpcode.py and
+# data/step2_disclosures.py (real DART API calls, run manually with DART_API_KEY set).
+
+fastapi
+uvicorn[standard]
+python-dotenv
+requests
+pydantic
+langgraph
+langchain
+langchain-upstage
+supabase
+chromadb
+pykrx

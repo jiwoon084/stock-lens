@@ -34,3 +34,9 @@ npm-debug.log*
 data/vector_store/
 data/generated/
 *.sqlite3
+
+# Archives
+*.zip
+
+# DART 수집 산출물 (재생성 가능, 용량 큼 — 스크립트는 추적, 산출물은 제외)
+data/*.json

@@ -39,12 +39,13 @@ GitHub Actions → Artifact Registry → Cloud Run
 ```
 stock-lens/
 ├── README.md, .gitignore, .env.example, compose.yaml
+├── requirements.txt          # 향후 실제 연동(LangGraph/SOLAR/pykrx/ChromaDB) 대상 의존성 목록 — 지금은 미사용
 ├── .github/workflows/        # ci.yml, deploy.yml
 ├── docs/                     # project-plan, requirements, screen-design, api-spec, architecture, deployment
 ├── frontend/                 # Vite + React + TS, src/features|shared|mocks|styles
-├── backend/                  # FastAPI app/api|core|schemas|services|prompts, tests/
+├── backend/                  # FastAPI app/api|core|schemas|services|prompts|agent(LangGraph 스켈레톤), tests/
 ├── infra/                    # GCP 설정 문서, Cloud Run 환경변수 예시
-├── data/samples/             # market/samsung.csv, documents/sample_documents.json
+├── data/                     # step1_corpcode.py, step2_disclosures.py(실제 DART 연동), samples/
 └── scripts/                  # prepare_market_data.py, ingest_documents.py
 ```
 
@@ -136,9 +137,10 @@ Artifact Registry, Workload Identity Federation, Secret Manager, GitHub Reposito
 
 ## 향후 구현 예정 항목
 
-- 실제 시세 데이터 연동 (`market_data_service.py` 교체, `scripts/prepare_market_data.py` 참고)
-- 실제 뉴스/공시/리포트 검색(RAG) 연동 (`retrieval_service.py` 교체, `scripts/ingest_documents.py` 참고)
-- SOLAR/Gemini 실제 LLM 호출 연동 (`llm_service.py` 교체, `app/prompts/explain_movement.txt` 참고)
+- 실제 시세 데이터 연동 (`market_data_service.py` 교체 — `pykrx` 사용 예정, 루트 `requirements.txt` 참고)
+- 실제 공시 데이터 수집 (`data/step1_corpcode.py` → `data/step2_disclosures.py`는 이미 동작하는 DART 연동 스크립트; `DART_API_KEY` 필요, 아직 백엔드에는 연결 안 됨)
+- 실제 뉴스/공시/리포트 검색(RAG) 연동 (`retrieval_service.py` 교체 — `chromadb` 사용 예정)
+- SOLAR/Gemini 실제 LLM 호출 연동 (`llm_service.py` 교체, `app/prompts/explain_movement.txt` + `backend/app/agent/`의 LangGraph 스켈레톤 참고)
 - 이벤트 마커, 분석 결과 캐싱, 모바일 반응형 (`docs/requirements.md`의 Should)
 - 종목 비교, 후속 질문, 분석 기록 저장 (`docs/requirements.md`의 Could)
 - 실제 GCP 프로젝트에서의 배포 검증
