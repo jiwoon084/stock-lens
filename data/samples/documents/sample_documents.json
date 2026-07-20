@@ -1,0 +1,32 @@
+[
+  {
+    "id": "source-1",
+    "ticker": "005930",
+    "type": "news",
+    "title": "삼성전자 실적 전망 관련 기사",
+    "publisher": "샘플 언론사",
+    "published_at": "2026-07-15T09:20:00+09:00",
+    "url": "https://example.com/news/1",
+    "excerpt": "실적 개선 기대가 확대되고 있다는 내용입니다."
+  },
+  {
+    "id": "source-2",
+    "ticker": "005930",
+    "type": "report",
+    "title": "반도체 업종 전망 리포트",
+    "publisher": "샘플 증권리서치",
+    "published_at": "2026-07-15T08:00:00+09:00",
+    "url": "https://example.com/report/1",
+    "excerpt": "업황 및 실적 전망에 대한 애널리스트 의견을 요약한 리포트 발췌입니다."
+  },
+  {
+    "id": "source-3",
+    "ticker": "005930",
+    "type": "disclosure",
+    "title": "삼성전자 공시 요약",
+    "publisher": "샘플 뉴스와이어",
+    "published_at": "2026-07-15T16:00:00+09:00",
+    "url": "https://example.com/disclosure/1",
+    "excerpt": "공개된 공시 자료 중 가격 변동과 관련될 수 있는 항목 발췌입니다."
+  }
+]

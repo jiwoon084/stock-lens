@@ -1,0 +1,44 @@
+import { useCallback, useState } from "react";
+
+import { fetchMovementExplanation } from "../../shared/api/explanations";
+import { ApiError } from "../../shared/api/client";
+import type { MovementExplanationResponse } from "../../shared/types/explanation";
+
+type Status = "idle" | "loading" | "success" | "error";
+
+interface UseMovementExplanationResult {
+  status: Status;
+  data: MovementExplanationResponse | null;
+  error: string | null;
+  explain: (ticker: string, selectedDate: string, interval: string) => Promise<void>;
+}
+
+export function useMovementExplanation(): UseMovementExplanationResult {
+  const [status, setStatus] = useState<Status>("idle");
+  const [data, setData] = useState<MovementExplanationResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const explain = useCallback(async (ticker: string, selectedDate: string, interval: string) => {
+    setStatus("loading");
+    setError(null);
+
+    try {
+      const response = await fetchMovementExplanation({
+        ticker,
+        selected_date: selectedDate,
+        interval,
+      });
+      setData(response);
+      setStatus("success");
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? `분석 요청이 실패했습니다. (${err.status})`
+          : "분석 요청 중 알 수 없는 오류가 발생했습니다.";
+      setError(message);
+      setStatus("error");
+    }
+  }, []);
+
+  return { status, data, error, explain };
+}
