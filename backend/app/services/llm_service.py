@@ -1,11 +1,17 @@
-"""Mock LLM analysis.
+"""Heuristic analysis grounded in real DART disclosure titles.
 
-Stands in for a future SOLAR/Gemini call (see app/prompts/explain_movement.txt
-for the prompt this will eventually use). Returns a response shaped exactly
-like the real one will be, so the frontend contract does not change later.
+Still not a real LLM/SOLAR/Gemini call (see app/prompts/explain_movement.txt for the prompt
+that will eventually replace this) — there is no sentiment analysis or text understanding here.
+Each factor is built directly from an actual disclosure's title (report_nm), so the content is
+real; only the positive/negative/neutral labeling is a heuristic tied to price direction, not
+derived from reading the filing. This keeps the response honest about what it actually knows.
 """
 
 from app.schemas.explanation import Factor, Source
+
+MAX_FACTORS = 3
+
+_IMPACT_BY_DIRECTION = {"up": "positive", "down": "negative", "flat": "neutral"}
 
 
 def generate_movement_explanation(
@@ -16,62 +22,47 @@ def generate_movement_explanation(
     direction: str,
     sources: list[Source],
 ) -> dict:
-    source_ids = [source.id for source in sources]
+    if not sources:
+        return {
+            "headline": "관련 DART 공시 자료를 찾지 못했습니다.",
+            "summary": (
+                f"선택 시점({selected_date}) 전후로 조회 가능한 DART 공시가 없어, 가격 변동과 "
+                "관련지을 수 있는 공개 자료를 확인하지 못했습니다."
+            ),
+            "confidence": "low",
+            "factors": [],
+            "limitations": [
+                "DART 공시 검색 결과가 없어 요인을 도출할 수 없습니다.",
+                "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다.",
+            ],
+        }
 
-    if direction == "up":
-        headline = "실적 기대와 수급 개선이 주요 관련 요인으로 분석됩니다."
-        factors = [
-            Factor(
-                title="실적 기대 상승",
-                impact="positive",
-                description="시장 전망치를 상회할 수 있다는 기대가 관련 자료에서 언급되었습니다.",
-                source_ids=source_ids[:2],
-            ),
-            Factor(
-                title="수급 개선",
-                impact="positive",
-                description="거래량 증가와 함께 매수 우위 수급이 관찰되었습니다.",
-                source_ids=source_ids[1:],
-            ),
-        ]
-    elif direction == "down":
-        headline = "업황 우려와 매도 수급이 주요 관련 요인으로 분석됩니다."
-        factors = [
-            Factor(
-                title="업황 우려 확대",
-                impact="negative",
-                description="관련 업종에 대한 부정적 전망이 자료에서 언급되었습니다.",
-                source_ids=source_ids[:2],
-            ),
-            Factor(
-                title="매도 수급 우위",
-                impact="negative",
-                description="거래량 변화와 함께 매도 우위 수급이 관찰되었습니다.",
-                source_ids=source_ids[1:],
-            ),
-        ]
-    else:
-        headline = "뚜렷한 방향성 없이 관망세가 이어진 것으로 분석됩니다."
-        factors = [
-            Factor(
-                title="특별한 이슈 부재",
-                impact="neutral",
-                description="선택 시점 전후로 가격에 뚜렷한 영향을 준 이벤트가 확인되지 않았습니다.",
-                source_ids=source_ids[:1],
-            ),
-        ]
+    impact = _IMPACT_BY_DIRECTION.get(direction, "neutral")
+    top_sources = sources[:MAX_FACTORS]
 
+    factors = [
+        Factor(
+            title=source.title,
+            impact=impact,
+            description=source.excerpt,
+            source_ids=[source.id],
+        )
+        for source in top_sources
+    ]
+
+    headline = f"'{top_sources[0].title}' 공시가 이 시점 가격 변동과 관련이 있을 수 있습니다."
     summary = (
-        f"선택 시점({selected_date}) 전후의 공개 자료를 종합하면, 등락률 {change_percent:+.2f}% 및 "
-        f"거래량 변화 {volume_change_percent:+.2f}%와 함께 위 요인들이 가격 변동과 관련이 있는 것으로 "
-        "확인됩니다. 이는 Mock 데이터 기반 분석입니다."
+        f"선택 시점({selected_date}) 전후 {len(sources)}건의 DART 공시 중 등락률 "
+        f"{change_percent:+.2f}%, 거래량 변화 {volume_change_percent:+.2f}%와 시점상 가까운 "
+        f"{len(top_sources)}건을 관련 요인으로 정리했습니다."
     )
 
     confidence = "medium" if abs(change_percent) >= 1.5 else "low"
 
     limitations = [
-        "공개 자료만으로 가격 변동의 직접적인 인과관계를 확정할 수 없습니다.",
-        "현재 응답은 실제 LLM 호출 없이 생성된 Mock 데이터입니다.",
+        "공시 제목과 접수일만으로 가격 변동의 직접적인 인과관계를 확정할 수 없습니다.",
+        "호재/유의/중립 표시는 실제 공시 내용을 분석한 것이 아니라, 등락 방향에 따른 단순 추정입니다.",
+        "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다.",
     ]
 
     return {

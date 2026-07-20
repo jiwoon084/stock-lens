@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 
 import { ChartToolbar, filterPricesByPeriod, type ChartPeriod } from "./features/price-chart/ChartToolbar";
 import { PriceChart } from "./features/price-chart/PriceChart";
-import { SelectedPoint } from "./features/price-chart/SelectedPoint";
+import { StockHeader } from "./features/price-chart/StockHeader";
 import { usePriceChart } from "./features/price-chart/usePriceChart";
-import { ExplanationPanel } from "./features/movement-explanation/ExplanationPanel";
+import { IssueChecklist } from "./features/movement-explanation/IssueChecklist";
 import { useMovementExplanation } from "./features/movement-explanation/useMovementExplanation";
 import { StockSelector } from "./features/stock-selector/StockSelector";
+import { useStocks } from "./features/stock-selector/useStocks";
 import { Card } from "./shared/components/Card";
 import type { PricePoint } from "./shared/types/stock";
 
@@ -15,12 +16,14 @@ export default function App() {
   const [period, setPeriod] = useState<ChartPeriod>("all");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
 
+  const stocks = useStocks();
   const { prices, loading: pricesLoading, error: pricesError } = usePriceChart(ticker);
-  const { status, data, error, explain } = useMovementExplanation();
+  const { status, data, error, explain, reset } = useMovementExplanation();
 
   useEffect(() => {
     setSelectedPoint(null);
-  }, [ticker]);
+    reset();
+  }, [ticker, reset]);
 
   const visiblePrices = filterPricesByPeriod(prices, period);
 
@@ -41,30 +44,37 @@ export default function App() {
       </header>
 
       <Card title="종목 선택">
-        <StockSelector selectedTicker={ticker} onSelect={handleSelectTicker} />
+        <StockSelector stocks={stocks} selectedTicker={ticker} onSelect={handleSelectTicker} />
       </Card>
 
-      <Card title="주가 차트">
-        <ChartToolbar period={period} onChangePeriod={setPeriod} />
-        {pricesError && <div className="error-banner">{pricesError}</div>}
-        {pricesLoading ? (
-          <p className="empty-state">가격 데이터를 불러오는 중입니다...</p>
-        ) : (
-          <PriceChart
-            prices={visiblePrices}
-            selectedTime={selectedPoint?.time ?? null}
-            onSelectPoint={handleSelectPoint}
-          />
-        )}
-      </Card>
+      <div className="layout-grid">
+        <div className="layout-grid__col layout-grid__col--left">
+          <StockHeader stocks={stocks} ticker={ticker} prices={prices} />
 
-      <Card title="선택한 날짜 정보">
-        <SelectedPoint point={selectedPoint} />
-      </Card>
+          <Card title="주가 차트">
+            <ChartToolbar period={period} onChangePeriod={setPeriod} />
+            {pricesError && <div className="error-banner">{pricesError}</div>}
+            {pricesLoading ? (
+              <p className="empty-state">가격 데이터를 불러오는 중입니다...</p>
+            ) : (
+              <PriceChart
+                prices={visiblePrices}
+                selectedTime={selectedPoint?.time ?? null}
+                onSelectPoint={handleSelectPoint}
+                explanationStatus={status}
+                explanationData={data}
+                explanationError={error}
+              />
+            )}
+          </Card>
+        </div>
 
-      <Card title="AI 분석">
-        <ExplanationPanel status={status} data={data} error={error} />
-      </Card>
+        <div className="layout-grid__col layout-grid__col--right">
+          <Card>
+            <IssueChecklist status={status} data={data} error={error} />
+          </Card>
+        </div>
+      </div>
     </>
   );
 }

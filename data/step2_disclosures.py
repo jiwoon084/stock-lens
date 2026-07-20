@@ -18,7 +18,9 @@ API_KEY = os.getenv("DART_API_KEY")
 
 DISCLOSURE_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 
-DAYS_BACK = 90  # 조회 기간(일)
+DAYS_BACK = 90  # 조회 기간(일) — 약 3개월, 차트가 보여주는 가격 이력 기간에 맞춘 값 (MVP 결정)
+# 주기적 재실행/갱신은 하지 않음: 이 스크립트를 실행한 시점의 스냅샷을 계속 사용한다.
+# (나중에 필요해지면 cron/스케줄러로 재실행하는 것을 검토)
 PAGE_COUNT = 100  # 페이지당 최대 100건
 
 CORP_CODES_PATH = Path(__file__).parent / "corp_codes.json"
@@ -31,24 +33,36 @@ def load_corp_codes(path: Path = CORP_CODES_PATH) -> dict:
 
 
 def fetch_disclosures(api_key: str, corp_code: str, bgn_de: str, end_de: str) -> list[dict]:
-    params = {
-        "crtfc_key": api_key,
-        "corp_code": corp_code,
-        "bgn_de": bgn_de,
-        "end_de": end_de,
-        "page_no": 1,
-        "page_count": PAGE_COUNT,
-    }
-    response = requests.get(DISCLOSURE_LIST_URL, params=params)
-    response.raise_for_status()
-    data = response.json()
+    all_items: list[dict] = []
+    page_no = 1
 
-    if data.get("status") == "013":
-        return []  # 조회된 데이터 없음
-    if data.get("status") != "000":
-        raise RuntimeError(f"DART API 오류: {data.get('status')} {data.get('message')}")
+    while True:
+        params = {
+            "crtfc_key": api_key,
+            "corp_code": corp_code,
+            "bgn_de": bgn_de,
+            "end_de": end_de,
+            "page_no": page_no,
+            "page_count": PAGE_COUNT,
+        }
+        response = requests.get(DISCLOSURE_LIST_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
 
-    return data.get("list", [])
+        if data.get("status") == "013":
+            break  # 조회된 데이터 없음
+        if data.get("status") != "000":
+            raise RuntimeError(f"DART API 오류: {data.get('status')} {data.get('message')}")
+
+        all_items.extend(data.get("list", []))
+
+        total_page = int(data.get("total_page", 1))
+        if page_no >= total_page:
+            break
+        page_no += 1
+        time.sleep(0.2)  # 페이지 간 최소 대기 (API 과다호출 방지)
+
+    return all_items
 
 
 def main():

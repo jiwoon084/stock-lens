@@ -11,6 +11,9 @@ services:
       - LLM_PROVIDER=mock
       - SOLAR_API_KEY=${SOLAR_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DART_API_KEY=${DART_API_KEY:-}
+    volumes:
+      - ./data:/app/data:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s

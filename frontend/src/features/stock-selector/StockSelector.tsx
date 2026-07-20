@@ -1,23 +1,12 @@
-import { useEffect, useState } from "react";
-
-import { MOCK_STOCKS } from "../../mocks/stockData";
-import { fetchStocks } from "../../shared/api/stocks";
 import type { Stock } from "../../shared/types/stock";
 
 interface StockSelectorProps {
+  stocks: Stock[];
   selectedTicker: string;
   onSelect: (ticker: string) => void;
 }
 
-export function StockSelector({ selectedTicker, onSelect }: StockSelectorProps) {
-  const [stocks, setStocks] = useState<Stock[]>(MOCK_STOCKS);
-
-  useEffect(() => {
-    fetchStocks()
-      .then(setStocks)
-      .catch(() => setStocks(MOCK_STOCKS));
-  }, []);
-
+export function StockSelector({ stocks, selectedTicker, onSelect }: StockSelectorProps) {
   return (
     <div className="stock-selector">
       {stocks.map((stock) => (

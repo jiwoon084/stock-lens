@@ -69,6 +69,58 @@ body {
   color: var(--color-primary);
 }
 
+.layout-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--spacing-md);
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .layout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.layout-grid__col {
+  display: flex;
+  flex-direction: column;
+}
+
+.stock-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.stock-header__name {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.stock-header__code {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.stock-header__price {
+  text-align: right;
+}
+
+.stock-header__close {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.stock-header__change {
+  font-size: 0.9rem;
+}
+
 .chart-toolbar {
   display: flex;
   gap: var(--spacing-sm);
@@ -90,31 +142,49 @@ body {
   border-color: var(--color-text);
 }
 
+.price-chart__wrapper {
+  position: relative;
+}
+
 .price-chart__container {
   width: 100%;
   height: 320px;
 }
 
-.selected-point {
-  display: flex;
-  gap: var(--spacing-lg);
-  flex-wrap: wrap;
+.price-chart__popover {
+  position: absolute;
+  z-index: 10;
+  max-width: 260px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-size: 0.85rem;
+  pointer-events: none;
 }
 
-.selected-point__item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.price-chart__popover--flip-x {
+  transform: translateX(-100%);
 }
 
-.selected-point__label {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
+.price-chart__popover--flip-y {
+  transform: translateY(-100%);
 }
 
-.selected-point__value {
-  font-size: 1.1rem;
+.price-chart__popover-title {
   font-weight: 600;
+  margin: 0 0 var(--spacing-sm) 0;
+}
+
+.price-chart__popover-list {
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+.price-chart__popover-loading {
+  color: var(--color-text-muted);
+  margin: 0;
 }
 
 .value--positive {
@@ -150,47 +220,116 @@ body {
   }
 }
 
-.explanation-panel__headline {
+.issue-checklist__title {
+  margin: 0;
   font-size: 1.05rem;
-  font-weight: 600;
-  margin: 0 0 var(--spacing-sm) 0;
 }
 
-.explanation-panel__summary {
+.issue-checklist__subtitle {
   color: var(--color-text-muted);
-  line-height: 1.5;
+  font-size: 0.85rem;
+  margin: 2px 0 var(--spacing-md) 0;
 }
 
-.factor-card {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-sm) var(--spacing-md);
-  margin-bottom: var(--spacing-sm);
+.issue-checklist__summary {
+  font-size: 0.9rem;
+  margin: 0 0 var(--spacing-md) 0;
 }
 
-.factor-card__title {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.source-list {
+.issue-checklist__list {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
-.source-list__item {
+.issue-checklist__item {
   padding: var(--spacing-sm) 0;
   border-top: 1px solid var(--color-border);
 }
 
-.source-list__item:first-child {
+.issue-checklist__item:first-child {
   border-top: none;
 }
 
-.source-list__item a {
+.issue-checklist__row {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: flex-start;
+}
+
+.issue-checklist__checkbox {
+  margin-top: 4px;
+}
+
+.issue-checklist__content {
+  flex: 1;
+}
+
+.issue-checklist__factor-title {
+  font-weight: 600;
+  margin-left: var(--spacing-sm);
+}
+
+.issue-checklist__factor-desc {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin: 4px 0;
+}
+
+.issue-checklist__expand-toggle {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 0.8rem;
+  padding: 0;
+  cursor: pointer;
+}
+
+.issue-checklist__sources {
+  list-style: none;
+  padding: 0;
+  margin: var(--spacing-sm) 0 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.issue-checklist__sources a {
   color: var(--color-primary);
   text-decoration: none;
+}
+
+.issue-checklist__footer {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-md);
+}
+
+.issue-tag {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.issue-tag--positive {
+  background: rgba(239, 83, 80, 0.15);
+  color: var(--color-positive);
+}
+
+.issue-tag--negative {
+  background: rgba(76, 141, 255, 0.15);
+  color: var(--color-negative);
+}
+
+.issue-tag--neutral {
+  background: rgba(154, 161, 172, 0.15);
+  color: var(--color-neutral);
+}
+
+.glossary-term {
+  border-bottom: 1px dotted var(--color-text-muted);
+  cursor: help;
 }
 
 .limitations-list {
