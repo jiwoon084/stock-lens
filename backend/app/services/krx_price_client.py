@@ -19,11 +19,11 @@ from app.core.config import settings
 from app.schemas.stock import PricePoint
 
 API_URL = "https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo"
-TRADING_DAYS = 30
+TRADING_DAYS = 250  # 차트 표시 기간(1년)에 맞춤 — 국내 연간 거래일수는 약 245~250일
 # Calendar-day lookback for the query window: enough to cover TRADING_DAYS trading days plus
 # one extra trading day (weekends/holidays included) so the oldest row in the output can still
 # compute volume_change_percent against a real previous day.
-LOOKBACK_CALENDAR_DAYS = 60
+LOOKBACK_CALENDAR_DAYS = 375
 
 
 class KrxApiError(Exception):
@@ -59,7 +59,7 @@ def _cached_fetch(ticker: str, as_of: str) -> tuple[dict, ...]:
             params={
                 "serviceKey": settings.krx_api_key,
                 "resultType": "json",
-                "numOfRows": 100,
+                "numOfRows": 300,  # TRADING_DAYS(250) + 여유분 — 1년치가 한 페이지에 다 들어오게
                 "pageNo": 1,
                 "likeSrtnCd": ticker,
                 "beginBasDt": begin.strftime("%Y%m%d"),
