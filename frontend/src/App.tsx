@@ -1,122 +1,117 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ChartToolbar, filterPricesByPeriod, type ChartPeriod } from "./features/price-chart/ChartToolbar";
-import { PriceChart, type ChartPointPosition } from "./features/price-chart/PriceChart";
+import { ChartTypeToggle, type ChartType } from "./features/price-chart/ChartTypeToggle";
+import { PriceChart } from "./features/price-chart/PriceChart";
+import { SelectedPointInfo } from "./features/price-chart/SelectedPointInfo";
+import { StockHeader } from "./features/price-chart/StockHeader";
 import { usePriceChart } from "./features/price-chart/usePriceChart";
-import { ReasonTooltip } from "./features/movement-explanation/ReasonTooltip";
+import { AIAnalysisPanel } from "./features/movement-explanation/AIAnalysisPanel";
 import { useMovementExplanation } from "./features/movement-explanation/useMovementExplanation";
+import { MarketEventsPanel } from "./features/market-events/MarketEventsPanel";
 import { StockSelector } from "./features/stock-selector/StockSelector";
+import { useStocks } from "./features/stock-selector/useStocks";
 import { ArticleChecklist } from "./features/article-checklist/ArticleChecklist";
 import { Card } from "./shared/components/Card";
-import { MOCK_STOCKS } from "./mocks/stockData";
+import { LoadingSpinner } from "./shared/components/LoadingSpinner";
 import type { PricePoint } from "./shared/types/stock";
-
-const TOOLTIP_WIDTH = 290;
-
-function changeClass(value: number): string {
-  if (value > 0) return "value--positive";
-  if (value < 0) return "value--negative";
-  return "";
-}
 
 export default function App() {
   const [ticker, setTicker] = useState("005930");
   const [period, setPeriod] = useState<ChartPeriod>("all");
+  const [chartType, setChartType] = useState<ChartType>("candle");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
-  const [tooltipPosition, setTooltipPosition] = useState<ChartPointPosition | null>(null);
-  const chartWrapperRef = useRef<HTMLDivElement>(null);
 
+  const stocks = useStocks();
   const { prices, loading: pricesLoading, error: pricesError } = usePriceChart(ticker);
-  const { status, data, error, explain } = useMovementExplanation();
+  const { status, data, error, explain, reset } = useMovementExplanation();
 
   useEffect(() => {
     setSelectedPoint(null);
-    setTooltipPosition(null);
-  }, [ticker]);
+    reset();
+  }, [ticker, reset]);
 
   const visiblePrices = filterPricesByPeriod(prices, period);
-  const latestPoint = prices[prices.length - 1] ?? null;
-  const stockName = MOCK_STOCKS.find((stock) => stock.ticker === ticker)?.name ?? ticker;
 
   function handleSelectTicker(nextTicker: string) {
     setTicker(nextTicker);
   }
 
-  function handleSelectPoint(point: PricePoint, position: ChartPointPosition) {
+  function handleSelectPoint(point: PricePoint) {
     setSelectedPoint(point);
     void explain(ticker, point.time, "1d");
-
-    const wrapper = chartWrapperRef.current;
-    const maxX = wrapper ? wrapper.clientWidth - TOOLTIP_WIDTH - 8 : position.x;
-    const maxY = wrapper ? wrapper.clientHeight - 160 : position.y;
-    setTooltipPosition({
-      x: Math.max(8, Math.min(position.x + 16, maxX)),
-      y: Math.max(8, Math.min(position.y - 32, maxY)),
-    });
   }
 
-  function handleCloseTooltip() {
-    setSelectedPoint(null);
-    setTooltipPosition(null);
+  function handleRetry() {
+    if (selectedPoint) void explain(ticker, selectedPoint.time, "1d");
   }
 
   return (
-    <>
-      <header className="app-header">
-        <div>
-          <h1>Stock Lens</h1>
-          <p>차트에서 급등락 지점을 클릭하면 원인 후보를, 오른쪽에서 오늘의 기사 핵심을 확인하세요.</p>
-        </div>
-        <StockSelector selectedTicker={ticker} onSelect={handleSelectTicker} />
+    <div className="page">
+      <header className="app-topbar">
+        <span className="app-topbar__logo">Stock Lens</span>
+        <span className="app-topbar__tagline">차트에서 날짜를 선택하면 주가 변동 요인을 분석합니다</span>
       </header>
 
-      <div className="stock-quote">
-        <span className="stock-quote__name">{stockName}</span>
-        <span className="stock-quote__ticker">{ticker}</span>
-        {latestPoint && (
-          <>
-            <span className="stock-quote__price">{latestPoint.close.toLocaleString()}원</span>
-            <span className={`stock-quote__change ${changeClass(latestPoint.change_percent)}`}>
-              {latestPoint.change_percent > 0 ? "▲" : latestPoint.change_percent < 0 ? "▼" : ""}{" "}
-              {Math.abs(latestPoint.change_percent).toFixed(2)}%
-            </span>
-          </>
-        )}
-      </div>
+      <section className="stock-summary">
+        <StockSelector stocks={stocks} selectedTicker={ticker} onSelect={handleSelectTicker} />
+        <StockHeader stocks={stocks} ticker={ticker} prices={prices} />
+      </section>
 
-      <div className="detail-grid">
-        <Card title="주가 차트" className="detail-grid__chart">
-          <ChartToolbar period={period} onChangePeriod={setPeriod} />
-          {pricesError && <div className="error-banner">{pricesError}</div>}
-          {pricesLoading ? (
-            <p className="empty-state">가격 데이터를 불러오는 중입니다...</p>
-          ) : (
-            <>
-              <p className="empty-state">급등·급락 지점을 누르면 원인 후보를 보여줘요</p>
-              <div className="price-chart__wrapper" ref={chartWrapperRef}>
+      <div className="workspace">
+        <div className="workspace__main">
+          <Card
+            className="chart-card"
+            title={
+              <span className="chart-card__title-row">
+                주가 차트
+                <ChartTypeToggle chartType={chartType} onChange={setChartType} />
+              </span>
+            }
+            actions={<ChartToolbar period={period} onChangePeriod={setPeriod} />}
+          >
+            {pricesError && <div className="error-banner">{pricesError}</div>}
+            {pricesLoading ? (
+              <LoadingSpinner label="가격 데이터를 불러오는 중입니다..." />
+            ) : (
+              <>
                 <PriceChart
                   prices={visiblePrices}
                   selectedTime={selectedPoint?.time ?? null}
+                  chartType={chartType}
                   onSelectPoint={handleSelectPoint}
                 />
-                {tooltipPosition && (
-                  <ReasonTooltip
-                    status={status}
-                    data={data}
-                    error={error}
-                    style={{ left: tooltipPosition.x, top: tooltipPosition.y }}
-                    onClose={handleCloseTooltip}
-                  />
-                )}
-              </div>
-            </>
-          )}
-        </Card>
+                <SelectedPointInfo point={selectedPoint} />
+              </>
+            )}
+          </Card>
 
-        <Card title="오늘의 체크리스트" className="detail-grid__checklist">
-          <ArticleChecklist ticker={ticker} />
-        </Card>
+          <MarketEventsPanel
+            prices={visiblePrices}
+            selectedPoint={selectedPoint}
+            status={status}
+            data={data}
+            error={error}
+            onSelectPoint={handleSelectPoint}
+            onRetry={handleRetry}
+          />
+        </div>
+
+        <div className="workspace__side">
+          <AIAnalysisPanel
+            status={status}
+            data={data}
+            error={error}
+            ticker={ticker}
+            selectedDate={selectedPoint?.time ?? null}
+            onRetry={handleRetry}
+          />
+
+          <Card title="오늘의 체크리스트">
+            <ArticleChecklist ticker={ticker} />
+          </Card>
+        </div>
       </div>
-    </>
+    </div>
   );
 }

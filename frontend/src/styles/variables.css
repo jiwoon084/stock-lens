@@ -1,27 +1,38 @@
 :root {
-  --color-bg: #f5f7fa;
+  --color-bg: #f5f6f8;
   --color-surface: #ffffff;
-  --color-border: #e5e8ec;
-  --color-text: #1a1d29;
+  --color-surface-muted: #fafbfc;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+  --color-text: #12151a;
   --color-text-muted: #6b7280;
-  --color-primary: #0f766e;
-  --color-positive: #e5484d;
-  --color-negative: #2f6fed;
-  --color-neutral: #9aa1ac;
-  --radius-md: 8px;
+  --color-text-subtle: #9aa1ac;
+  --color-accent: #4f46e5;
+  --color-accent-soft: rgba(79, 70, 229, 0.1);
+  --color-positive: #d92b2b;
+  --color-positive-soft: rgba(217, 43, 43, 0.1);
+  --color-negative: #1c64f2;
+  --color-negative-soft: rgba(28, 100, 242, 0.1);
+  --color-neutral: #6b7280;
+  --color-neutral-soft: rgba(107, 114, 128, 0.1);
+  --radius-sm: 6px;
+  --radius-md: 10px;
   --radius-lg: 14px;
+  --spacing-xs: 4px;
   --spacing-sm: 8px;
   --spacing-md: 16px;
   --spacing-lg: 24px;
+  --spacing-xl: 32px;
 
-  --tag-positive-bg: #e3f5ee;
-  --tag-positive-text: #12805f;
-  --tag-negative-bg: #fbe7e8;
-  --tag-negative-text: #c23b3b;
-  --tag-earnings-bg: #fdf1de;
-  --tag-earnings-text: #b5690a;
-  --tag-caution-bg: #fdeaea;
-  --tag-caution-text: #c0392b;
-  --tag-neutral-bg: #eef0f3;
-  --tag-neutral-text: #5b6472;
+  /* 오늘의 체크리스트 태그 색상 */
+  --tag-positive-bg: rgba(16, 163, 74, 0.1);
+  --tag-positive-text: #0f7a37;
+  --tag-negative-bg: var(--color-positive-soft);
+  --tag-negative-text: var(--color-positive);
+  --tag-earnings-bg: rgba(217, 119, 6, 0.12);
+  --tag-earnings-text: #b45309;
+  --tag-caution-bg: var(--color-positive-soft);
+  --tag-caution-text: var(--color-positive);
+  --tag-neutral-bg: var(--color-neutral-soft);
+  --tag-neutral-text: var(--color-neutral);
 }

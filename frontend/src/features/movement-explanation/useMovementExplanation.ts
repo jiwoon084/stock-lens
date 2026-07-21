@@ -4,17 +4,18 @@ import { fetchMovementExplanation } from "../../shared/api/explanations";
 import { ApiError } from "../../shared/api/client";
 import type { MovementExplanationResponse } from "../../shared/types/explanation";
 
-type Status = "idle" | "loading" | "success" | "error";
+export type ExplanationStatus = "idle" | "loading" | "success" | "error";
 
 interface UseMovementExplanationResult {
-  status: Status;
+  status: ExplanationStatus;
   data: MovementExplanationResponse | null;
   error: string | null;
   explain: (ticker: string, selectedDate: string, interval: string) => Promise<void>;
+  reset: () => void;
 }
 
 export function useMovementExplanation(): UseMovementExplanationResult {
-  const [status, setStatus] = useState<Status>("idle");
+  const [status, setStatus] = useState<ExplanationStatus>("idle");
   const [data, setData] = useState<MovementExplanationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,5 +41,11 @@ export function useMovementExplanation(): UseMovementExplanationResult {
     }
   }, []);
 
-  return { status, data, error, explain };
+  const reset = useCallback(() => {
+    setStatus("idle");
+    setData(null);
+    setError(null);
+  }, []);
+
+  return { status, data, error, explain, reset };
 }

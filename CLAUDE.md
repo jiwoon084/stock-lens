@@ -25,10 +25,13 @@
   Docker/CI/CD까지 이미 상당 부분 만들어둔 상태 — 아래 4번 참고)
 - 투자자문법 관련: "추천 전면 배제"까지 갈 필요는 없고, 순한 설명·정보 제공 수준의 표현이면
   법적으로 괜찮다는 게 1차 멘토링 피드백.
-- **프론트 화면 디자인: 정영준님의 초기 mock UI가 아니라, 1차 멘토링 목업 이미지 기준으로
-  Claude Code와 함께 새로 짠 구조로 간다** (2026-07-20 확정). 이유: 목업(헤더 + 좌측 차트/원인
-  후보 툴팁 + 우측 오늘의 체크리스트, 라이트 테마)에 더 가깝고 더 깔끔함. 정영준님의 원래 구조
-  (캔들스틱 차트, 카드 나열형 AI 분석 패널)는 대체됨 — 아래 4번이 현재(대체 후) 구조.
+- ~~프론트 화면 디자인: 목업 이미지 기준으로 Claude Code와 함께 새로 짠 구조 (2026-07-20 확정)~~
+  → **2026-07-21 재확정: 정영준님의 Koyfin/Perplexity 스타일 대시보드 UI로 전면 전환.**
+  이유: 팀원이 헤더(종목 요약) + 캔들/라인 토글 차트 + "주목할 만한 가격변동"(급등락일 카드
+  스트립) + AI 분석 리포트(요인 체크리스트 포함) + 관련 자료 카드까지 이미 만들어뒀고, 사용자가
+  이 구조로 가기로 결정함. 목업 기준 2단 그리드+플로팅 툴팁 구조는 폐기됨 — 아래 4번이 현재
+  구조. 유일하게 유지한 것: "오늘의 체크리스트"(실제 네이버 뉴스 기반) 카드 — 팀원 대시보드에는
+  없던 기능이라 AI 분석 리포트 아래에 새로 얹음.
 
 ## 3. 1차 멘토링 피드백 요약 (2026-07-03, Zoom 17:00~17:30)
 
@@ -44,10 +47,9 @@
 
 ## 4. 현재 코드 상태 (중요 — 실제로 확인한 사실)
 
-이 저장소는 원래 **정영준님이 만든 모노레포 boilerplate**로 시작했지만 (제가 처음에 만들었던
-`app/` 스켈레톤은 이 구조로 대체·흡수됨), **2026-07-20에 프론트 화면을 1차 멘토링 목업 이미지
-기준으로 Claude Code와 함께 다시 짰습니다** (위 2번 참고 — 정영준님의 원래 mock UI 대신 이 구조로
-가기로 확정). 아래는 그 이후(현재) 구조:
+이 저장소는 원래 **정영준님이 만든 모노레포 boilerplate**로 시작했고, 2026-07-20에 한 번 목업
+이미지 기준 구조로 재설계했었으나 **2026-07-21에 정영준님의 Koyfin/Perplexity 스타일 대시보드
+UI로 다시 전환했습니다** (위 2번 참고). 아래는 현재(대시보드 전환 후) 구조:
 
 ```
 backend/    FastAPI (routes → schemas/services → core/config 3계층)
@@ -61,13 +63,20 @@ backend/    FastAPI (routes → schemas/services → core/config 3계층)
   app/agent/          LangGraph 스켈레톤 (state.py/nodes.py/graph.py, 현재 TODO 스텁, 손 안 댐)
   app/prompts/        explain_movement.txt (LLM 프롬프트 — [id] 인용 강제로 할루시네이션 방지)
   requirements.txt    fastapi, uvicorn, pydantic, pydantic-settings, pytest, httpx, openai, requests
-frontend/   Vite + React + TypeScript (라이트 테마, 목업 기준 헤더 + 좌우 2단 그리드 레이아웃)
-  src/features/price-chart/          PriceChart(라인/영역 차트, 클릭 시 픽셀 좌표 반환), ChartToolbar, usePriceChart
-  src/features/movement-explanation/ ReasonTooltip(차트 위 플로팅 "원인 후보" 카드), useMovementExplanation
-  src/features/article-checklist/    ArticleChecklist, ChecklistItemRow, useArticleChecklist ("오늘의 체크리스트")
-  src/features/stock-selector/       StockSelector
-  src/mocks/                         stockData.ts, explanationData.ts, checklistData.ts
-  src/shared/                        api client(stocks/explanations/checklist), types, Card
+frontend/   Vite + React + TypeScript (라이트 테마, Koyfin/Perplexity 스타일 대시보드 — 정영준님 작업)
+  src/App.tsx                         상단바 + 종목선택/StockHeader + workspace(좌: 차트+주목할만한
+                                       가격변동, 우: AI분석리포트+오늘의체크리스트) 레이아웃
+  src/features/price-chart/           PriceChart(캔들/라인 토글, ChartTypeToggle), StockHeader,
+                                       SelectedPointInfo, ChartToolbar, usePriceChart
+  src/features/movement-explanation/  AIAnalysisPanel(요인 체크리스트 IssueChecklist 포함),
+                                       useMovementExplanation
+  src/features/market-events/         MarketEventsPanel(급등락일 카드 스트립) + EventCard, SourceCard
+                                       (관련 자료 카드), marketEvents.ts(급등락 상위 N일 선정)
+  src/features/article-checklist/     ArticleChecklist, ChecklistItemRow, useArticleChecklist
+                                       ("오늘의 체크리스트" — 대시보드에 없던 기능이라 새로 얹음)
+  src/features/stock-selector/        StockSelector, useStocks
+  src/mocks/                          stockData.ts, explanationData.ts, checklistData.ts
+  src/shared/                         api client(stocks/explanations/checklist), types, Card(title+actions)
 data/       step1_corpcode.py, step2_disclosures.py(DART, 1년치 청크 수집), step3_major_events.py
             (신규 — 자기주식취득/처분·유상증자 등 구조화 공시, 팀원 작성), step5_news.py(네이버 뉴스)
             corp_codes.json, disclosures.json, major_events.json, news.json
@@ -80,17 +89,22 @@ infra/      GCP Cloud Run 배포 관련 문서 (아직 실제 배포 안 함, GC
 compose.yaml         docker compose up --build 으로 로컬 실행 가능
 ```
 
-**폐기된 컴포넌트 (목업 재설계로 대체됨, 삭제됨):** `SelectedPoint.tsx`, `ExplanationPanel.tsx`,
-`FactorCard.tsx`, `SourceList.tsx` — 별도 카드로 나열하던 방식 대신 `ReasonTooltip`이 차트 위
-플로팅 카드로 합쳐서 보여줌. (팀원이 별도로 만든 대시보드형 리디자인 컴포넌트들 — `market-events/*`,
-`AIAnalysisPanel.tsx`, `IssueChecklist.tsx`, `ChartTypeToggle.tsx`, `SelectedPointInfo.tsx`,
-`StockHeader.tsx`, `useStocks.ts` — 도 8번 병합 시 프론트는 이 구조 유지로 확정되며 제외함.)
+**폐기된 컴포넌트 (2026-07-21 대시보드 전환으로 삭제됨):** 목업 기준 구조 때 만들었던
+`ReasonTooltip.tsx`(차트 위 플로팅 카드), `SelectedPoint.tsx`, `ExplanationPanel.tsx`,
+`FactorCard.tsx`, `SourceList.tsx` — 전부 정영준님의 대시보드 컴포넌트(`AIAnalysisPanel`,
+`MarketEventsPanel`, `SelectedPointInfo`, `StockHeader` 등)로 대체됨. **주의**: 8번(2026-07-21
+1차 병합) 당시엔 반대로 "프론트는 내 것 유지, 팀원 대시보드 컴포넌트 제외"로 결정했었으나,
+바로 다음에 사용자가 "UI도 팀원 것 전체로 전환"으로 재확정하면서 뒤집힘 — 팀원 컴포넌트들을
+git 히스토리(커밋 `7760d32`~`0a71d36`)에서 다시 꺼내와 적용함.
 
-**현재 구현 범위 (목업 이미지 기준 재설계 + M1/M2/M3 실제 데이터·LLM 연동 완료, 2026-07-21):**
-- 종목 선택(5종목) → 헤더에 현재가/등락률 표시 → 라인 차트에서 급등락 지점 클릭 → 그 자리에
-  플로팅 "이날 왜 올랐을까?/내렸을까? — 원인 후보" 카드(요인 + 근거, 근거는 실제 링크로 클릭 가능)
-  표시 → 우측 "오늘의 체크리스트"(체크박스 + [호재/실적/유의/중립] 태그 + 출처 건수 + 원문 링크 +
-  확인 진행률) 전부 **실제로 동작 확인함** (Playwright로 스크린샷 검증, 콘솔 에러 없음)
+**현재 구현 범위 (대시보드 UI 전환 + M1/M2/M3 실제 데이터·LLM 연동 완료, 2026-07-21):**
+- 상단바 → 종목 선택 + StockHeader(현재가/등락률) → 캔들/라인 토글 가능한 주가 차트(클릭 시
+  선택 정보 표시) → "주목할 만한 가격변동"(등락률 상위 카드, 클릭 시 분석) → 우측 "AI 분석
+  리포트"(요인 체크리스트 + 관련 자료 카드, 근거는 실제 링크로 클릭 가능) + "오늘의 체크리스트"
+  (체크박스 + [호재/실적/유의/중립] 태그 + 출처 건수 + 원문 링크 + 확인 진행률) 전부 **실제로
+  동작 확인함** (Playwright로 스크린샷 검증, 콘솔 에러 없음). 백엔드 계약(`/api/v1/stocks`,
+  `/api/v1/stocks/{ticker}/prices`, `/api/v1/explanations`, `/api/v1/stocks/{ticker}/checklist`)이
+  두 프론트 구조 사이에서 동일해서, UI를 통째로 갈아끼워도 백엔드는 전혀 안 바꿔도 됐음.
 - **M1 완료 — 공식 KRX API로 전환 (2026-07-21, 8번 병합 시 팀원 것 채택)**: 처음엔 pykrx(스크래핑)
   +SQLite 오프라인 캐시로 구현했었으나, 팀원이 **금융위원회_주식시세정보(data.go.kr 공식 서비스키
   API)** 로 이미 전환·검증해둔 것을 발견해 그쪽으로 교체함. pykrx는 개인 계정 기반 스크래핑이라
