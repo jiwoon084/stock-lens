@@ -1,13 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { Factor, MovementExplanationResponse } from "../../shared/types/explanation";
-import { ExplanationLoading } from "./ExplanationLoading";
-import type { ExplanationStatus } from "./useMovementExplanation";
 
 interface IssueChecklistProps {
-  status: ExplanationStatus;
-  data: MovementExplanationResponse | null;
-  error: string | null;
+  data: MovementExplanationResponse;
 }
 
 const IMPACT_TAG: Record<Factor["impact"], string> = {
@@ -34,7 +30,7 @@ function renderWithGlossary(text: string): ReactNode {
   );
 }
 
-export function IssueChecklist({ status, data, error }: IssueChecklistProps) {
+export function IssueChecklist({ data }: IssueChecklistProps) {
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -42,20 +38,6 @@ export function IssueChecklist({ status, data, error }: IssueChecklistProps) {
     setChecked(new Set());
     setExpanded(new Set());
   }, [data]);
-
-  if (status === "idle") {
-    return <p className="empty-state">차트에서 날짜를 클릭하면 오늘의 체크리스트를 만들어드려요.</p>;
-  }
-
-  if (status === "loading") {
-    return <ExplanationLoading />;
-  }
-
-  if (status === "error") {
-    return <div className="error-banner">{error ?? "분석 요청이 실패했습니다."}</div>;
-  }
-
-  if (!data) return null;
 
   function toggleChecked(key: string) {
     setChecked((prev) => {
@@ -75,13 +57,16 @@ export function IssueChecklist({ status, data, error }: IssueChecklistProps) {
     });
   }
 
+  if (data.factors.length === 0) {
+    return <p className="empty-state">확인된 주요 요인이 없습니다.</p>;
+  }
+
   return (
     <div className="issue-checklist">
-      <h4 className="issue-checklist__title">오늘의 체크리스트</h4>
-      <p className="issue-checklist__subtitle">관심 종목 기사 핵심을 짚고 넘어가기</p>
-      <p className="issue-checklist__summary">
-        오늘 기사 {data.sources.length}건 → 핵심 이슈 {data.factors.length}개로 정리했어요
-      </p>
+      <div className="issue-checklist__header">
+        <h4 className="issue-checklist__title">주요 요인</h4>
+        <span className="issue-checklist__count">{data.factors.length}개</span>
+      </div>
 
       <ul className="issue-checklist__list">
         {data.factors.map((factor) => {
@@ -103,13 +88,15 @@ export function IssueChecklist({ status, data, error }: IssueChecklistProps) {
                   <span className={`issue-tag issue-tag--${factor.impact}`}>{IMPACT_TAG[factor.impact]}</span>
                   <span className="issue-checklist__factor-title">{factor.title}</span>
                   <p className="issue-checklist__factor-desc">{renderWithGlossary(factor.description)}</p>
-                  <button
-                    type="button"
-                    className="issue-checklist__expand-toggle"
-                    onClick={() => toggleExpanded(key)}
-                  >
-                    출처 {linkedSources.length}건 {isExpanded ? "숨기기" : "보기"}
-                  </button>
+                  {linkedSources.length > 0 && (
+                    <button
+                      type="button"
+                      className="issue-checklist__expand-toggle"
+                      onClick={() => toggleExpanded(key)}
+                    >
+                      출처 {linkedSources.length}건 {isExpanded ? "숨기기" : "보기"}
+                    </button>
+                  )}
                   {isExpanded && (
                     <ul className="issue-checklist__sources">
                       {linkedSources.map((source) => (
@@ -132,12 +119,6 @@ export function IssueChecklist({ status, data, error }: IssueChecklistProps) {
       <p className="issue-checklist__footer">
         확인 완료 {checked.size}/{data.factors.length}
       </p>
-
-      <ul className="limitations-list">
-        {data.limitations.map((limitation) => (
-          <li key={limitation}>{limitation}</li>
-        ))}
-      </ul>
     </div>
   );
 }

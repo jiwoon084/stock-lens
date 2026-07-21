@@ -1,39 +1,19 @@
 import { createChart, type IChartApi, type ISeriesApi } from "lightweight-charts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
-import type { ExplanationStatus } from "../movement-explanation/useMovementExplanation";
-import type { MovementExplanationResponse } from "../../shared/types/explanation";
 import type { PricePoint } from "../../shared/types/stock";
 
 interface PriceChartProps {
   prices: PricePoint[];
   selectedTime: string | null;
   onSelectPoint: (point: PricePoint) => void;
-  explanationStatus: ExplanationStatus;
-  explanationData: MovementExplanationResponse | null;
-  explanationError: string | null;
 }
 
-interface Anchor {
-  x: number;
-  y: number;
-  flipX: boolean;
-  flipY: boolean;
-}
-
-export function PriceChart({
-  prices,
-  selectedTime,
-  onSelectPoint,
-  explanationStatus,
-  explanationData,
-  explanationError,
-}: PriceChartProps) {
+export function PriceChart({ prices, selectedTime, onSelectPoint }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const pricesRef = useRef<PricePoint[]>(prices);
-  const [anchor, setAnchor] = useState<Anchor | null>(null);
 
   useEffect(() => {
     pricesRef.current = prices;
@@ -43,37 +23,28 @@ export function PriceChart({
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
-      layout: { background: { color: "transparent" }, textColor: "#e6e8eb" },
+      layout: { background: { color: "transparent" }, textColor: "#4b5563" },
       grid: {
-        vertLines: { color: "#2a2e38" },
-        horzLines: { color: "#2a2e38" },
+        vertLines: { color: "#eef0f3" },
+        horzLines: { color: "#eef0f3" },
       },
-      timeScale: { borderColor: "#2a2e38" },
-      rightPriceScale: { borderColor: "#2a2e38" },
+      timeScale: { borderColor: "#e5e7eb" },
+      rightPriceScale: { borderColor: "#e5e7eb" },
       autoSize: true,
     });
 
     const series = chart.addCandlestickSeries({
-      upColor: "#ef5350",
-      downColor: "#4c8dff",
+      upColor: "#d92b2b",
+      downColor: "#1c64f2",
       borderVisible: false,
-      wickUpColor: "#ef5350",
-      wickDownColor: "#4c8dff",
+      wickUpColor: "#d92b2b",
+      wickDownColor: "#1c64f2",
     });
 
     chart.subscribeClick((param) => {
-      if (!param.time || !param.point) return;
+      if (!param.time) return;
       const point = pricesRef.current.find((p) => p.time === param.time);
       if (!point) return;
-
-      const width = containerRef.current?.clientWidth ?? 0;
-      const height = containerRef.current?.clientHeight ?? 0;
-      setAnchor({
-        x: param.point.x,
-        y: param.point.y,
-        flipX: param.point.x > width / 2,
-        flipY: param.point.y > height / 2,
-      });
       onSelectPoint(point);
     });
 
@@ -100,14 +71,7 @@ export function PriceChart({
       })),
     );
     chartRef.current?.timeScale().fitContent();
-    setAnchor(null);
   }, [prices]);
-
-  useEffect(() => {
-    const handleResize = () => setAnchor(null);
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   useEffect(() => {
     if (!seriesRef.current) return;
@@ -117,7 +81,7 @@ export function PriceChart({
             {
               time: selectedTime,
               position: "aboveBar",
-              color: "#4c8dff",
+              color: "#4f46e5",
               shape: "arrowDown",
               text: "선택",
             },
@@ -126,40 +90,5 @@ export function PriceChart({
     );
   }, [selectedTime]);
 
-  return (
-    <div className="price-chart__wrapper">
-      <div className="price-chart__container" ref={containerRef} />
-      {anchor && (
-        <div
-          className={`price-chart__popover ${anchor.flipX ? "price-chart__popover--flip-x" : ""} ${
-            anchor.flipY ? "price-chart__popover--flip-y" : ""
-          }`.trim()}
-          style={{ left: anchor.x, top: anchor.y }}
-        >
-          {explanationStatus === "loading" && (
-            <p className="price-chart__popover-loading">원인 분석 중...</p>
-          )}
-          {explanationStatus === "error" && (
-            <p className="price-chart__popover-loading">{explanationError ?? "분석 실패"}</p>
-          )}
-          {explanationStatus === "success" && explanationData && (
-            <>
-              <p className="price-chart__popover-title">이날 왜 올랐을까? — 원인 후보</p>
-              <ol className="price-chart__popover-list">
-                {explanationData.factors.map((factor) => {
-                  const source = explanationData.sources.find((s) => s.id === factor.source_ids[0]);
-                  return (
-                    <li key={factor.title}>
-                      {factor.title}
-                      {source ? ` — 근거: ${source.publisher}` : ""}
-                    </li>
-                  );
-                })}
-              </ol>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
+  return <div className="price-chart__container" ref={containerRef} />;
 }

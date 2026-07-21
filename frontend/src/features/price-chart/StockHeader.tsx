@@ -23,15 +23,20 @@ export function StockHeader({ stocks, ticker, prices }: StockHeaderProps) {
   return (
     <div className="stock-header">
       <div className="stock-header__identity">
-        <div className="stock-header__name">{stock?.name ?? ticker}</div>
+        <div className="stock-header__name-row">
+          <span className="stock-header__name">{stock?.name ?? ticker}</span>
+          {stock?.market && <span className="stock-header__market">{stock.market}</span>}
+        </div>
         <div className="stock-header__code">{ticker}</div>
       </div>
+
       <div className="stock-header__price">
         <div className="stock-header__close">{latest.close.toLocaleString()}원</div>
         <div className={`stock-header__change ${changeClass}`}>
           {arrow} {diff !== null ? Math.abs(diff).toLocaleString() : ""} ({latest.change_percent > 0 ? "+" : ""}
           {latest.change_percent.toFixed(2)}%)
         </div>
+        <div className="stock-header__updated">업데이트 기준 {latest.time}</div>
       </div>
     </div>
   );
