@@ -52,90 +52,102 @@
 ```
 backend/    FastAPI (routes → schemas/services → core/config 3계층)
   app/api/routes/     health.py, stocks.py, explanations.py, checklist.py
-  app/services/       market_data_service.py(data/market_data.sqlite3 캐시만 조회, 없으면 mock —
-                      pykrx는 절대 직접 호출 안 함), retrieval_service.py(disclosures.json 실제
-                      DART 공시, 없으면 mock), llm_service.py(아직 mock), checklist_service.py
-                      (news.json 실제 뉴스, 없으면 mock), explanation_service.py(위 3개 조합)
-  app/agent/          LangGraph 스켈레톤 (state.py/nodes.py/graph.py, 현재 TODO 스텁)
-  app/prompts/        explain_movement.txt (실제 LLM 연동 시 사용할 프롬프트)
-  requirements.txt    fastapi, uvicorn, pydantic, pydantic-settings, pytest, httpx
+  app/services/       market_data_service.py(공식 KRX API, 없으면 mock), krx_price_client.py
+                      (data.go.kr 금융위원회_주식시세정보, 요청마다 실시간 호출 + 당일 in-process
+                      캐시), retrieval_service.py(disclosures.json 실제 DART 공시 + 실제 본문 발췌
+                      + 루틴성 공시 필터링, 없으면 mock), llm_service.py(SOLAR→Gemini→Groq 3단
+                      폴백, 실제 LLM), checklist_service.py(news.json 실제 뉴스, 없으면 mock),
+                      explanation_service.py(위 서비스 조합)
+  app/agent/          LangGraph 스켈레톤 (state.py/nodes.py/graph.py, 현재 TODO 스텁, 손 안 댐)
+  app/prompts/        explain_movement.txt (LLM 프롬프트 — [id] 인용 강제로 할루시네이션 방지)
+  requirements.txt    fastapi, uvicorn, pydantic, pydantic-settings, pytest, httpx, openai, requests
 frontend/   Vite + React + TypeScript (라이트 테마, 목업 기준 헤더 + 좌우 2단 그리드 레이아웃)
   src/features/price-chart/          PriceChart(라인/영역 차트, 클릭 시 픽셀 좌표 반환), ChartToolbar, usePriceChart
   src/features/movement-explanation/ ReasonTooltip(차트 위 플로팅 "원인 후보" 카드), useMovementExplanation
-  src/features/article-checklist/    ArticleChecklist, ChecklistItemRow, useArticleChecklist (신규 — "오늘의 체크리스트")
+  src/features/article-checklist/    ArticleChecklist, ChecklistItemRow, useArticleChecklist ("오늘의 체크리스트")
   src/features/stock-selector/       StockSelector
   src/mocks/                         stockData.ts, explanationData.ts, checklistData.ts
   src/shared/                        api client(stocks/explanations/checklist), types, Card
-data/       step1_corpcode.py, step2_disclosures.py (DART, 동작 확인됨), step4_prices.py(신규 —
-            pykrx 일봉 수집 → market_data.sqlite3, backend venv로 수동/주기 실행), step5_news.py
-            (네이버 뉴스 검색 API, NAVER_CLIENT_ID/SECRET 발급 완료·실행 완료)
-            corp_codes.json, disclosures.json, news.json, market_data.sqlite3
-            (수집 결과, gitignore 처리됨 — 로컬에만 존재)
-docs/       project-plan.md, requirements.md, screen-design.md, api-spec.md, architecture.md, deployment.md
-infra/      GCP Cloud Run 배포 관련 문서 (아직 실제 배포 안 함)
-.github/workflows/  ci.yml (pytest), deploy.yml (GCP 배포 — 아직 미검증)
+data/       step1_corpcode.py, step2_disclosures.py(DART, 1년치 청크 수집), step3_major_events.py
+            (신규 — 자기주식취득/처분·유상증자 등 구조화 공시, 팀원 작성), step5_news.py(네이버 뉴스)
+            corp_codes.json, disclosures.json, major_events.json, news.json
+            (수집 결과, gitignore 처리됨 — 로컬에만 존재. pykrx/step4_prices.py/market_data.sqlite3는
+            공식 KRX API로 교체되며 완전히 삭제됨 — 아래 8번 참고)
+docs/       project-plan.md, requirements.md, screen-design.md, api-spec.md, architecture.md,
+            deployment.md (팀원이 2026-07-21에 실제 구현 상태에 맞춰 갱신 — 병합 시 그대로 채택)
+infra/      GCP Cloud Run 배포 관련 문서 (아직 실제 배포 안 함, GCE로 다시 손봐야 함)
+.github/workflows/  ci.yml (pytest), deploy.yml (GCP 배포, DART/KRX 시크릿 추가됨 — 아직 미검증)
 compose.yaml         docker compose up --build 으로 로컬 실행 가능
 ```
 
 **폐기된 컴포넌트 (목업 재설계로 대체됨, 삭제됨):** `SelectedPoint.tsx`, `ExplanationPanel.tsx`,
 `FactorCard.tsx`, `SourceList.tsx` — 별도 카드로 나열하던 방식 대신 `ReasonTooltip`이 차트 위
-플로팅 카드로 합쳐서 보여줌.
+플로팅 카드로 합쳐서 보여줌. (팀원이 별도로 만든 대시보드형 리디자인 컴포넌트들 — `market-events/*`,
+`AIAnalysisPanel.tsx`, `IssueChecklist.tsx`, `ChartTypeToggle.tsx`, `SelectedPointInfo.tsx`,
+`StockHeader.tsx`, `useStocks.ts` — 도 8번 병합 시 프론트는 이 구조 유지로 확정되며 제외함.)
 
-**현재 구현 범위 (목업 이미지 기준 재설계 완료 + M1/M2 실제 데이터 연동 완료, 2026-07-21):**
+**현재 구현 범위 (목업 이미지 기준 재설계 + M1/M2/M3 실제 데이터·LLM 연동 완료, 2026-07-21):**
 - 종목 선택(5종목) → 헤더에 현재가/등락률 표시 → 라인 차트에서 급등락 지점 클릭 → 그 자리에
-  플로팅 "이날 왜 올랐을까?/내렸을까? — 원인 후보" 카드(요인 + 근거) 표시 → 우측 "오늘의
-  체크리스트"(체크박스 + [호재/실적/유의/중립] 태그 + 출처 건수 + 확인 진행률) 전부 **실제로
-  동작 확인함** (Playwright로 스크린샷 검증, 콘솔 에러 없음)
-- **M1 완료 (2026-07-21에 아키텍처 재정비)**: pykrx는 KRX/네이버 금융을 스크래핑하는 비공식 방식이라
-  **요청마다 직접 호출하지 않기로 결정** — `data/step4_prices.py`가 오프라인으로 1년치 일봉을 수집해
-  `data/market_data.sqlite3`에 저장하고, `market_data_service.py`는 이 캐시만 읽음(캐시 없으면
-  결정론적 mock으로 폴백). 차트 기간은 **현재 시점 기준 최근 1년**(`_LOOKBACK_DAYS = 365`).
-  발표 문구: "한국거래소 및 네이버 금융 데이터를 수집하는 pykrx를 활용해 시세 데이터를 사전
-  구축했으며, 서비스 안정성을 위해 사용자 요청 시 외부 사이트를 직접 호출하지 않고 내부 저장
-  데이터를 제공합니다." — **pykrx를 "공식 API"라고 표현하지 말 것.**
-  금융위원회 공식 API는 신청만 해두고(키 발급 대기), 대표 종목·날짜 몇 개를 나중에 교차 검증할
-  계획 — 지금 당장 그 연동에 시간 쓰지 않기로 함(아래 7번 참고).
-- **M2 완료**: `retrieval_service.py`가 `data/disclosures.json`(실제 DART 공시)을 선택 날짜에 가장
-  가까운 공시 3건으로 매칭해 원인 후보 근거로 사용함 — 실제 dart.fss.or.kr 링크. `checklist_service.py`도
-  `data/news.json`(네이버 뉴스 검색 API, `data/step5_news.py`로 수집)이 있으면 근접 제목으로
-  클러스터링 + 키워드 기반 태그 분류(호재/실적/유의/중립)를 거쳐 실제 기사로 채움 — **2026-07-21에
-  NAVER_CLIENT_ID/SECRET 발급 완료 후 실행해서 검증까지 끝남.** 원인 후보 근거와 체크리스트 항목
-  모두 실제 원문 링크("원문 보기"/근거 링크 클릭 시 새 탭으로 이동)까지 연결됨. 세 서비스(시세·
-  공시·뉴스) 모두 데이터 파일이 없으면 자동으로 기존 mock으로 폴백하므로 팀원/CI 환경에서는
-  안전하게 그대로 동작함.
-- **공시 수집 기간을 차트와 동일하게 1년으로 확장 (2026-07-21)**: `data/step2_disclosures.py`의
-  `DAYS_BACK`을 90 → 365로 늘리고, Open DART list.json의 조회기간 제한 때문에 90일 단위로 나눠
-  요청(`CHUNK_DAYS`)하도록 수정. 재수집 결과 `disclosures.json`이 2025-07-23~2026-07-21 전체를
-  커버함(총 1331건). 차트의 어느 지점을 클릭해도 원인 후보가 몇 달씩 동떨어진 공시를 근거로
-  들이미는 문제가 해결됨.
-- 차트 확대/축소 버그 수정(2026-07-21): `PriceChart.tsx`가 기본으로 마우스 휠/드래그 확대·이동을
-  허용해서, 페이지 스크롤 중 실수로 차트가 확대되면 "전체" 탭이 눌린 채로도 일부 기간만 보이는
-  문제가 있었음 → `handleScroll: false, handleScale: false`로 막아 기간 탭으로만 범위가 바뀌게 함.
-- **M3 절반 완료 (2026-07-21)**: `llm_service.py`가 **SOLAR-pro2 → Gemini Flash → Groq(Llama 3.3
-  70B) 3단 폴백**으로 실제 LLM을 호출함(전부 OpenAI 호환 엔드포인트라 provider별 SDK 없이 `openai`
-  패키지 하나로 처리). 프롬프트(`app/prompts/explain_movement.txt`)가 검색된 문서를 `[id]`로 주고
-  "이 id만 인용 가능"하게 강제해서 할루시네이션된 출처를 막음. **SOLAR는 실제로 동작 확인함**(실제
-  공시 내용을 읽고 근거 없는 요인은 `source_ids: []`로 스스로 구분하는 것까지 검증) — **Gemini/Groq는
-  아직 키가 없어서 자동으로 건너뛰어짐**(키 없는 provider는 조용히 skip 후 다음으로 넘어가서,
-  키가 채워지는 순간 코드 변경 없이 바로 활성화됨). 3개 다 실패/미설정이면 기존 mock으로 폴백.
-  `LLM_PROVIDER=mock`이면 아예 mock만 씀(테스트에서 강제 — `backend/tests/conftest.py`가 매 테스트
-  전에 mock으로 고정해서 pytest가 실제 토큰을 쓰지 않음). **주의**: retrieval(근거 찾기)은 여전히
-  결정론적 로직(날짜 근접도/키워드) 그대로 두고, LLM은 "찾아온 근거를 읽고 설명을 쓰는" 생성
-  단계에만 씀 — 표준 RAG 패턴이자 "출처 기반 신뢰성" 원칙과 일치. 전부 LLM화하는 게 아님.
-  ⚠️ `backend/app/core/config.py`의 `Settings.env_file`이 상대경로 `.env`였던 버그도 같이 고침
-  (backend/ 안에서 uvicorn을 실행하면 backend/.env를 찾아서 루트 `.env`를 못 읽고 있었음 —
+  플로팅 "이날 왜 올랐을까?/내렸을까? — 원인 후보" 카드(요인 + 근거, 근거는 실제 링크로 클릭 가능)
+  표시 → 우측 "오늘의 체크리스트"(체크박스 + [호재/실적/유의/중립] 태그 + 출처 건수 + 원문 링크 +
+  확인 진행률) 전부 **실제로 동작 확인함** (Playwright로 스크린샷 검증, 콘솔 에러 없음)
+- **M1 완료 — 공식 KRX API로 전환 (2026-07-21, 8번 병합 시 팀원 것 채택)**: 처음엔 pykrx(스크래핑)
+  +SQLite 오프라인 캐시로 구현했었으나, 팀원이 **금융위원회_주식시세정보(data.go.kr 공식 서비스키
+  API)** 로 이미 전환·검증해둔 것을 발견해 그쪽으로 교체함. pykrx는 개인 계정 기반 스크래핑이라
+  ToS/계정 안전성 리스크가 있는데, 공식 API는 이 문제가 없음 — `market_data_service.py`가
+  `KRX_API_KEY` 설정 시 `krx_price_client.py`로 요청마다 실시간 호출(당일 in-process 캐시로 같은
+  날 재호출 방지), 키 없거나 실패 시 결정론적 mock으로 폴백. 차트 1년 표시 요구사항에 맞춰
+  `TRADING_DAYS`(30→250)·`LOOKBACK_CALENDAR_DAYS`(60→375)·`numOfRows`(100→300)를 조정함(팀원
+  원본은 30거래일 기준이었음). 발표 문구: "금융위원회_주식시세정보(data.go.kr) 공식 API로 실제
+  시세를 조회하며, 서비스 안정성을 위해 당일 캐시를 사용합니다." — 이제 정말 공식 API라고 말해도 됨.
+- **M2 완료 — retrieval_service.py 병합**: 날짜 근접도 매칭(내 것, 1년치 공시 커버)에 팀원의 실제
+  DART document.xml 본문 발췌(`_fetch_document_excerpt`, XML/HTML 파싱 폴백 포함) + 루틴성 공시
+  (임원 소유변동 등) 후순위 배치(`_is_routine`) + `major_events.json` 구조화 필드 우선 사용을
+  결합함. 랭킹 키는 `(is_routine, 과거우선여부, 날짜거리)` 3단 조합. 근거의 excerpt가 이제 "OO
+  공시 원문은 DART에서 확인하세요" 같은 placeholder가 아니라 **실제 공시 본문 일부**임.
+  `checklist_service.py`는 그대로(팀원이 손대지 않음) — `data/news.json` 있으면 실제 뉴스, 없으면
+  mock. 원인 후보 근거·체크리스트 항목 모두 실제 원문 링크 클릭 가능. 데이터 파일 없으면 자동
+  mock 폴백이라 팀원/CI 환경에서도 안전.
+- 공시 수집 기간 1년 확장 + 페이지네이션(2026-07-21): `data/step2_disclosures.py`가
+  `DAYS_BACK=365`(차트와 일치, 내 결정) + 90일 청크 분할(Open DART 기간 제한 대응) + 청크별
+  페이지네이션(팀원 기여 — 청크당 100건 넘는 공시도 전부 수집)을 모두 반영. `disclosures.json`
+  2025-07-23~2026-07-21 전체 커버(1331건).
+- 차트 확대/축소 버그 수정: `PriceChart.tsx`에 `handleScroll: false, handleScale: false` — 마우스
+  휠/드래그로 실수로 확대·이동되는 것을 막아 기간 탭으로만 범위가 바뀌게 함.
+- **M3 완료(SOLAR) / Gemini·Groq 키 대기**: `llm_service.py`가 **SOLAR-pro2 → Gemini Flash →
+  Groq(Llama 3.3 70B) 3단 폴백**으로 실제 LLM을 호출함(전부 OpenAI 호환 엔드포인트라 `openai`
+  패키지 하나로 처리). 프롬프트가 검색된 문서를 `[id]`로 주고 그 id만 인용하게 강제해 할루시네이션
+  방지. SOLAR는 실제 동작 확인(공시를 읽고 근거 없는 요인은 `source_ids: []`로 스스로 구분).
+  Gemini/Groq는 키 없어서 자동 skip — 채워지면 코드 변경 없이 활성화됨. `LLM_PROVIDER=mock`이면
+  mock만 사용(테스트에서 강제 — `backend/tests/conftest.py`). retrieval은 여전히 결정론적 로직
+  그대로 두고 LLM은 생성 단계에만 사용 — 표준 RAG, "출처 기반 신뢰성" 원칙과 일치.
+  ⚠️ `Settings.env_file`이 상대경로 `.env`였던 버그도 고침(둘 다 독립적으로 이 버그를 발견·수정함 —
   절대경로로 고정).
 
 **향후 마일스톤 (docs/project-plan.md):**
-- M1: ~~실제 시세 연동~~ → **완료**
-- M2: ~~실제 검색(공시·뉴스) 연동~~ → **완료**. 여유 있으면 `retrieval_service.py`/`checklist_service.py`를
-  chromadb 기반 임베딩 검색·클러스터링으로 고도화(현재는 날짜 근접도/제목 중복·키워드 기반의 단순 로직).
+- M1: ~~실제 시세 연동~~ → **완료** (공식 KRX API)
+- M2: ~~실제 검색(공시·뉴스) 연동~~ → **완료** (실제 본문 발췌까지 포함)
 - M3: SOLAR 실제 연동 **완료**. Gemini/Groq 키 발급 대기 중 — 발급되면 `.env`에 `GEMINI_API_KEY`,
   `GROQ_API_KEY`만 채워 넣으면 코드 변경 없이 3단 폴백이 자동으로 완성됨.
-- M3: 실제 LLM 연동 — `llm_service.py`를 SOLAR(langchain-upstage) 또는 Gemini로 교체,
-  `app/prompts/explain_movement.txt` + `backend/app/agent/`의 LangGraph 스켈레톤 활용,
-  `LLM_PROVIDER` 환경변수로 전환
-- M4: GCP 배포 — `infra/gcp-setup.md`의 1회성 설정 완료 후 `deploy.yml` 실행
+- M4: GCP 배포 — `infra/gcp-setup.md`의 1회성 설정 완료 후 `deploy.yml` 실행 (Cloud Run 기준으로
+  작성돼 있어 GCE 확정에 맞춰 다시 손봐야 함)
+
+## 8. 팀원 브랜치 병합 (2026-07-21)
+
+팀원(권지운/정영준)이 origin/main에 독자적으로 4개 커밋을 푸시해둔 상태였음(대시보드형 프론트
+리디자인, 공식 KRX API 연동, retrieval_service 본문 발췌 고도화, docs 갱신). 사용자 지시에 따라
+다음 기준으로 병합함:
+- **프론트엔드: 내 것(목업 기준 재설계) 유지.** 팀원의 "Koyfin/Perplexity 스타일 대시보드"
+  리디자인 컴포넌트는 전부 제외함(위 4번 "폐기된 컴포넌트" 참고).
+- **시세 데이터: 팀원 것(공식 KRX API) 채택** — pykrx의 ToS 리스크를 팀원이 먼저 지적했고, 이미
+  실제 키로 검증까지 끝내둔 상태였음. `data/step4_prices.py`·`market_data.sqlite3`는 완전히 삭제.
+- **공시 검색: 병합** — 내 1년 창 + 팀원의 실제 본문 발췌/루틴 필터링 로직.
+- **LLM: 내 것(SOLAR/Gemini/Groq 3단 실제 폴백) 유지** — 팀원 건 아직 heuristic mock 수준이라
+  명백히 내 것이 더 발전됨.
+- **부가 기능/문서: 팀원 것 그대로 채택** — `step3_major_events.py`, docs/*.md, README.md,
+  deploy.yml 시크릿 추가, compose.yaml, infra/* 전부 병합함(우리 작업과 충돌 없음).
+- 병합 후 백엔드 테스트 14개(8+팀원 6개) 전부 통과, 프론트 빌드 정상, 실제 KRX API로 시세 조회
+  end-to-end 검증 완료.
 
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
@@ -170,34 +182,28 @@ Docker+GCE)의 인프라 패턴을 그대로 재사용하기로 확정함:
   Docker Desktop 앱이 실제로 켜져 있는지 먼저 확인).
 - **로컬 실행 방법** (README.md 참고):
   ```
-  # (최초 1회, 또는 시세 갱신하고 싶을 때) 주가 캐시 수집
-  backend\.venv\Scripts\python.exe data\step4_prices.py
   # Backend
   cd backend && .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
   # Frontend (다른 터미널)
   cd frontend && npm run dev -- --port 5173
   ```
-  또는 `docker compose up --build`. `data/step4_prices.py`를 안 돌려도 앱은 mock 시세로 정상
-  동작하지만(2026-07-21 기준 안전한 폴백), 실제 시세를 보려면 한 번 실행해야 함. 이전 세션에서
-  백엔드(:8000)·프론트(:5173) 둘 다 로컬에서 띄워서 확인했었는데, 새 세션/재부팅 후에는 다시
-  켜야 할 수 있음.
+  또는 `docker compose up --build`. `KRX_API_KEY`/`DART_API_KEY`/`NAVER_CLIENT_ID`+`SECRET` 등이
+  없어도 앱은 전부 mock으로 정상 동작함(안전한 폴백) — 실제 데이터를 보려면 `.env`에 해당 키를
+  채우면 됨(시세는 키만 있으면 요청 시 바로 살아남, 공시/뉴스는 `data/step2_disclosures.py`·
+  `data/step5_news.py`를 한 번 실행해야 함). 이전 세션에서 백엔드(:8000)·프론트(:5173) 둘 다
+  로컬에서 띄워서 확인했었는데, 새 세션/재부팅 후에는 다시 켜야 할 수 있음.
 
 ## 7. 다음에 결정/진행할 것
 
 1. ~~"오늘의 기사 체크리스트" 카드 추가 여부~~ → **완료 (2026-07-20)**.
-2. ~~M1(pykrx 실제 시세)~~ → **완료**(2026-07-21에 sqlite 캐시 구조로 재정비 — 4번 참고).
-   ~~M2(공시·뉴스 실제 연동)~~ → **완료 (2026-07-21, NAVER_CLIENT_ID/SECRET 발급 완료 +
-   `data/step5_news.py` 실행 검증까지 끝남)**.
-3. M3(SOLAR/Gemini 실제 LLM) — 아직 시작 전. **우선순위상 다음 차례** (사용자가 명시적으로
-   "금융위원회 API 연동보다 OpenDART·뉴스·Agent 연결에 집중" 하라고 확정함, 2026-07-21).
-   `.env`에 SOLAR/Gemini/Supabase/GCE 자격증명은 이미 채워둠(6번 참고) — 실제 연동 코드 작성만 남음.
-4. **시세 데이터 아키텍처 (2026-07-21 확정)**: pykrx는 비공식 스크래핑이라 요청마다 호출하지 않고,
-   `data/step4_prices.py`로 오프라인 수집 → `data/market_data.sqlite3` 캐시 → 백엔드는 캐시만 조회.
-   **금융위원회 공식 API는 신청만 해두고(키 아직 없음), 나중에 대표 종목·날짜 몇 개만 교차 검증**
-   할 계획 — 지금 이 연동 작업에 시간 쓰지 않기로 함. 발표 때 pykrx를 "공식 API"라고 표현하지
-   말 것(정확한 문구는 4번 코드 블록 위 M1 항목 참고).
-5. GCP/GCE 배포(M4)는 아직 전혀 준비 안 됨 — `infra/gcp-setup.md`/`deploy.yml`이 Cloud Run 기준으로
+2. ~~M1(실제 시세)~~ → **완료** (공식 KRX API, 8번 병합 참고). ~~M2(공시·뉴스 실제 연동)~~ →
+   **완료**(NAVER_CLIENT_ID/SECRET 발급 완료 + 실행 검증까지 끝남, retrieval_service는 병합으로
+   본문 발췌까지 고도화됨).
+3. ~~M3(SOLAR/Gemini/Groq 실제 LLM)~~ → **SOLAR 완료, Gemini/Groq 키 발급 대기 중** (developers 콘솔
+   가입 안내는 이전 대화 참고 — Gemini: aistudio.google.com/apikey, Groq: console.groq.com).
+   받으면 `.env`에 `GEMINI_API_KEY`/`GROQ_API_KEY`만 채우면 끝.
+4. GCP/GCE 배포(M4)는 아직 전혀 준비 안 됨 — `infra/gcp-setup.md`/`deploy.yml`이 Cloud Run 기준으로
    작성돼 있어 GCE로 다시 손봐야 함.
-6. Supabase/Upstage 키는 이미 `.env`에 채워짐(2026-07-21) — M3 진행 시 바로 사용 가능.
-7. 정영준님이 별도로 프론트를 계속 작업 중이라면, 이번에 확정한 목업 기준 구조(2번/4번 참고)로
+5. Supabase/Upstage 키는 이미 `.env`에 채워짐(2026-07-21) — 실제 Supabase 연동 코드는 아직 안 짬.
+6. 정영준님이 프론트를 별도로 더 작업한다면, 8번에서 확정한 목업 기준 구조로
    맞춰야 함 — 병합 시 충돌 나면 이 구조가 우선.

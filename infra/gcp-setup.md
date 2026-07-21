@@ -35,10 +35,16 @@ stored — GitHub Actions authenticates via OIDC (`google-github-actions/auth@v2
 ```bash
 printf '%s' "$SOLAR_API_KEY" | gcloud secrets create SOLAR_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 printf '%s' "$GEMINI_API_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
+printf '%s' "$DART_API_KEY" | gcloud secrets create DART_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
+printf '%s' "$KRX_API_KEY" | gcloud secrets create KRX_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 ```
 
 Grant the backend Cloud Run runtime service account `roles/secretmanager.secretAccessor` on
-both secrets.
+all four secrets. `DART_API_KEY` and `KRX_API_KEY` are the ones actually in use today (SOLAR/
+GEMINI are still unused placeholders) — see `docs/deployment.md` for a packaging gap around
+DART (the disclosure snapshot isn't in the deploy image yet). `KRX_API_KEY` has no such gap:
+if it's unset or the data.go.kr call fails, `market_data_service.py` just falls back to mock
+prices instead of breaking.
 
 ## 5. Configure GitHub Repository Variables
 

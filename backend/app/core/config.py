@@ -3,7 +3,8 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 루트 .env를 항상 참조 (uvicorn을 backend/에서 실행해도 상대경로 ".env"가 backend/.env를
-# 가리켜 실패하지 않도록 절대경로로 고정)
+# 가리켜 실패하지 않도록 절대경로로 고정 — Docker에는 .env가 아예 없어서 이 값은 무시되고
+# environment: / docker run -e로 넘긴 실제 환경변수가 그대로 읽힘)
 _ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
 
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+
+    dart_api_key: str = ""
+    krx_api_key: str = ""
 
     @property
     def allowed_origins_list(self) -> list[str]:

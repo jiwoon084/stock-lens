@@ -90,9 +90,15 @@ Returns a mock daily OHLCV series (30 trading days ending 2026-07-17) for the gi
 
 ## POST /api/v1/explanations
 
-Returns a mock movement-explanation response, shaped identically to what a future
-SOLAR/Gemini-backed response will return (see `app/services/llm_service.py` and
-`app/prompts/explain_movement.txt`).
+Returns a movement-explanation response. `factors`/`sources` are now built from **real DART
+disclosures** (see `app/services/retrieval_service.py` and `docs/project-plan.md` M2) when a
+`data/disclosures.json` snapshot exists for the ticker/date — otherwise (e.g. in a Docker image
+without `data/` mounted, or a date/ticker with no nearby disclosures) they come back empty and
+`headline`/`summary` say so honestly rather than inventing content. `headline`/`summary`/
+`confidence`/impact labeling are still rule-based (see `app/services/llm_service.py`) — not a
+real LLM call yet. Because sources are fetched live from DART per request, **the exact response
+content is not fully deterministic** and depends on `DART_API_KEY` being set and DART being
+reachable; only the schema shape below is guaranteed.
 
 **Request schema**
 
@@ -137,39 +143,69 @@ SOLAR/Gemini-backed response will return (see `app/services/llm_service.py` and
 }
 ```
 
-**Success (200)**
+**Success (200)** — real example captured against actual DART data for Samsung Electronics
+(자기주식처분결정 has a structured DART API, so its `excerpt` is a clean labeled summary rather
+than raw document text — see `app/services/retrieval_service.py`'s `_format_structured_excerpt`):
 
 ```json
 {
   "ticker": "005930",
-  "selected_date": "2026-07-15",
-  "price": 84200,
-  "change_percent": 3.42,
-  "volume_change_percent": 81.3,
-  "direction": "up",
-  "headline": "실적 기대와 외국인 매수세가 주요 관련 요인으로 분석됩니다.",
-  "summary": "선택 시점 전후의 공개 자료를 종합하면 실적 기대와 반도체 업황 개선 전망이 상승과 관련된 주요 요인으로 확인됩니다.",
+  "selected_date": "2026-07-17",
+  "price": 84400.0,
+  "change_percent": -2.65,
+  "volume_change_percent": 236.58,
+  "direction": "down",
+  "headline": "'자기주식처분결과보고서' 공시가 이 시점 가격 변동과 관련이 있을 수 있습니다.",
+  "summary": "선택 시점(2026-07-17) 전후 5건의 DART 공시 중 등락률 -2.65%, 거래량 변화 +236.58%와 시점상 가까운 3건을 관련 요인으로 정리했습니다.",
   "confidence": "medium",
   "factors": [
     {
-      "title": "실적 기대 상승",
-      "impact": "positive",
-      "description": "시장 전망치를 상회할 수 있다는 기대가 관련 기사에서 언급되었습니다.",
-      "source_ids": ["source-1", "source-2"]
+      "title": "주요사항보고서(자기주식처분결정)",
+      "impact": "negative",
+      "description": "처분목적: 임원 등 성과급의 자기주식 지급 / 처분주식수: 1,132,477주 / 처분가액: 1주당 285,000원, 총 322,755,945,000원 / 처분기간: 2026년 07월 13일 ~ 2026년 07월 13일",
+      "source_ids": ["20260713000395"]
     }
   ],
   "sources": [
     {
-      "id": "source-1",
-      "type": "news",
-      "title": "삼성전자 실적 전망 관련 기사",
-      "publisher": "샘플 언론사",
-      "published_at": "2026-07-15T09:20:00+09:00",
-      "url": "https://example.com",
-      "excerpt": "실적 개선 기대가 확대되고 있다는 내용입니다."
+      "id": "20260713000395",
+      "type": "disclosure",
+      "title": "주요사항보고서(자기주식처분결정)",
+      "publisher": "DART · 삼성전자",
+      "published_at": "2026-07-13T00:00:00+09:00",
+      "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260713000395",
+      "excerpt": "처분목적: 임원 등 성과급의 자기주식 지급 / 처분주식수: 1,132,477주 / 처분가액: 1주당 285,000원, 총 322,755,945,000원 / 처분기간: 2026년 07월 13일 ~ 2026년 07월 13일"
     }
   ],
-  "limitations": ["공개 자료만으로 가격 변동의 직접적인 인과관계를 확정할 수 없습니다."]
+  "limitations": [
+    "공시 제목과 접수일만으로 가격 변동의 직접적인 인과관계를 확정할 수 없습니다.",
+    "호재/유의/중립 표시는 실제 공시 내용을 분석한 것이 아니라, 등락 방향에 따른 단순 추정입니다.",
+    "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다."
+  ]
+}
+```
+
+**Success (200) — no matching disclosures found** (e.g. `DART_API_KEY` unset, `data/disclosures.json`
+missing, or no disclosure near the selected date for that ticker — honest empty result, not a
+fabricated one):
+
+```json
+{
+  "ticker": "005930",
+  "selected_date": "2026-07-17",
+  "price": 84400.0,
+  "change_percent": -2.65,
+  "volume_change_percent": 236.58,
+  "direction": "down",
+  "headline": "관련 DART 공시 자료를 찾지 못했습니다.",
+  "summary": "선택 시점(2026-07-17) 전후로 조회 가능한 DART 공시가 없어, 가격 변동과 관련지을 수 있는 공개 자료를 확인하지 못했습니다.",
+  "confidence": "low",
+  "factors": [],
+  "sources": [],
+  "limitations": [
+    "DART 공시 검색 결과가 없어 요인을 도출할 수 없습니다.",
+    "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다."
+  ]
 }
 ```
 

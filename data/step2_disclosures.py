@@ -32,24 +32,36 @@ def load_corp_codes(path: Path = CORP_CODES_PATH) -> dict:
 
 
 def fetch_disclosures(api_key: str, corp_code: str, bgn_de: str, end_de: str) -> list[dict]:
-    params = {
-        "crtfc_key": api_key,
-        "corp_code": corp_code,
-        "bgn_de": bgn_de,
-        "end_de": end_de,
-        "page_no": 1,
-        "page_count": PAGE_COUNT,
-    }
-    response = requests.get(DISCLOSURE_LIST_URL, params=params)
-    response.raise_for_status()
-    data = response.json()
+    all_items: list[dict] = []
+    page_no = 1
 
-    if data.get("status") == "013":
-        return []  # 조회된 데이터 없음
-    if data.get("status") != "000":
-        raise RuntimeError(f"DART API 오류: {data.get('status')} {data.get('message')}")
+    while True:
+        params = {
+            "crtfc_key": api_key,
+            "corp_code": corp_code,
+            "bgn_de": bgn_de,
+            "end_de": end_de,
+            "page_no": page_no,
+            "page_count": PAGE_COUNT,
+        }
+        response = requests.get(DISCLOSURE_LIST_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
 
-    return data.get("list", [])
+        if data.get("status") == "013":
+            break  # 조회된 데이터 없음
+        if data.get("status") != "000":
+            raise RuntimeError(f"DART API 오류: {data.get('status')} {data.get('message')}")
+
+        all_items.extend(data.get("list", []))
+
+        total_page = int(data.get("total_page", 1))
+        if page_no >= total_page:
+            break
+        page_no += 1
+        time.sleep(0.2)  # 페이지 간 최소 대기 (API 과다호출 방지)
+
+    return all_items
 
 
 def date_chunks(end_de: str, days_back: int, chunk_days: int) -> list[tuple[str, str]]:
