@@ -129,19 +129,19 @@ git 히스토리(커밋 `7760d32`~`0a71d36`)에서 다시 꺼내와 적용함.
   2025-07-23~2026-07-21 전체 커버(1331건).
 - 차트 확대/축소 버그 수정: `PriceChart.tsx`에 `handleScroll: false, handleScale: false` — 마우스
   휠/드래그로 실수로 확대·이동되는 것을 막아 기간 탭으로만 범위가 바뀌게 함.
-- **M3 완료(SOLAR) / Gemini는 키 대기 — 2026-07-22에 아키텍처를 "3단 폴백"에서 "난이도 기반
+- **M3 완료(SOLAR+Gemini 둘 다 실동작 검증됨) — 2026-07-22에 아키텍처를 "3단 폴백"에서 "난이도 기반
   2단 라우팅"으로 변경**: `llm_service.py`가 이제 **폴백 체인이 아니라 근거 자료 개수로 SOLAR-pro2 /
   Gemini Flash 중 하나를 고름** — 근거가 `_SIMPLE_SOURCE_THRESHOLD`(2)개 초과면 "어려운 요청"으로
   보고 SOLAR-pro2, 그 이하면 "쉬운 요청"으로 보고 Gemini Flash. 라우팅된 쪽이 키가 없거나 실패하면
   나머지 하나를 그 요청에 한해 안전망으로 시도(순수 폴백 아님, 라우팅 실패 시 보정용). **Groq는
   완전히 제거함**(3단 → 2단). 전부 OpenAI 호환 엔드포인트라 `openai` 패키지 하나로 처리. 프롬프트가
-  검색된 문서를 `[id]`로 주고 그 id만 인용하게 강제해 할루시네이션 방지. SOLAR는 실제 동작 확인(공시를
-  읽고 근거 없는 요인은 `source_ids: []`로 스스로 구분). **Gemini는 아직 키 없어서 자동으로 SOLAR로
-  대체됨** — 채워지면 코드 변경 없이 실제 라우팅이 활성화됨. `LLM_PROVIDER=mock`이면 mock만 사용
-  (테스트에서 강제 — `backend/tests/conftest.py`). 라우팅 로직 자체는 `backend/tests/test_llm_service.py`
-  로 고정해둠(`_providers_for()`가 임계값 안팎에서 정확히 [gemini, solar] / [solar, gemini] 순서를
-  반환하는지). retrieval은 여전히 결정론적 로직 그대로 두고 LLM은 생성 단계에만 사용 — 표준 RAG,
-  "출처 기반 신뢰성" 원칙과 일치.
+  검색된 문서를 `[id]`로 주고 그 id만 인용하게 강제해 할루시네이션 방지. **SOLAR·Gemini 둘 다 실제
+  키로 동작 확인함**(2026-07-22, Gemini는 aistudio.google.com/apikey에서 발급받은 키로 근거 1건짜리
+  요청을 직접 호출해 정상 응답 확인). `LLM_PROVIDER=mock`이면 mock만 사용(테스트에서 강제 —
+  `backend/tests/conftest.py`). 라우팅 로직 자체는 `backend/tests/test_llm_service.py`로 고정해둠
+  (`_providers_for()`가 임계값 안팎에서 정확히 [gemini, solar] / [solar, gemini] 순서를 반환하는지).
+  retrieval은 여전히 결정론적 로직 그대로 두고 LLM은 생성 단계에만 사용 — 표준 RAG, "출처 기반
+  신뢰성" 원칙과 일치.
   ⚠️ `Settings.env_file`이 상대경로 `.env`였던 버그도 고침(둘 다 독립적으로 이 버그를 발견·수정함 —
   절대경로로 고정).
 - **retrieval_service.py에 뉴스도 섞임 (2026-07-22)**: 원래 DART 공시만 근거로 썼는데,
@@ -154,8 +154,7 @@ git 히스토리(커밋 `7760d32`~`0a71d36`)에서 다시 꺼내와 적용함.
 **향후 마일스톤 (docs/project-plan.md):**
 - M1: ~~실제 시세 연동~~ → **완료** (공식 KRX API)
 - M2: ~~실제 검색(공시·뉴스) 연동~~ → **완료** (실제 본문 발췌 + 뉴스 통합까지 포함)
-- M3: SOLAR 실제 연동 **완료**, 2단 난이도 라우팅 구조로 확정. Gemini 키 발급 대기 중 — 발급되면
-  `.env`에 `GEMINI_API_KEY`만 채워 넣으면 코드 변경 없이 라우팅이 완성됨.
+- M3: SOLAR+Gemini 2단 난이도 라우팅 **완료** — 둘 다 실제 키로 동작 확인됨(2026-07-22). Groq 제거됨.
 - M4: GCP 배포 — `infra/gcp-setup.md`의 1회성 설정 완료 후 `deploy.yml` 실행 (Cloud Run 기준으로
   작성돼 있어 GCE 확정에 맞춰 다시 손봐야 함)
 
@@ -226,9 +225,8 @@ Docker+GCE)의 인프라 패턴을 그대로 재사용하기로 확정함:
 2. ~~M1(실제 시세)~~ → **완료** (공식 KRX API, 8번 병합 참고). ~~M2(공시·뉴스 실제 연동)~~ →
    **완료**(NAVER_CLIENT_ID/SECRET 발급 완료 + 실행 검증까지 끝남, retrieval_service는 병합으로
    본문 발췌까지 고도화됨).
-3. ~~M3(SOLAR/Gemini 실제 LLM)~~ → **SOLAR 완료, 난이도 기반 2단 라우팅 구조 확정(Groq 제거,
-   2026-07-22)**. Gemini는 아직 키 발급 대기 중 — aistudio.google.com/apikey 에서 발급 후 `.env`에
-   `GEMINI_API_KEY`만 채우면 끝(코드 변경 불필요).
+3. ~~M3(SOLAR/Gemini 실제 LLM)~~ → **완료** — 난이도 기반 2단 라우팅 구조(Groq 제거, 2026-07-22),
+   SOLAR·Gemini 둘 다 실제 키로 동작 확인됨.
 4. GCP/GCE 배포(M4)는 아직 전혀 준비 안 됨 — `infra/gcp-setup.md`/`deploy.yml`이 Cloud Run 기준으로
    작성돼 있어 GCE로 다시 손봐야 함.
 5. Supabase/Upstage 키는 이미 `.env`에 채워짐(2026-07-21) — 실제 Supabase 연동 코드는 아직 안 짬.
