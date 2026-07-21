@@ -1,42 +1,130 @@
-"""Heuristic analysis grounded in real DART disclosure titles.
+"""Movement analysis: a real SOLAR/Gemini call when possible, a rule-based heuristic otherwise.
 
-Still not a real LLM/SOLAR/Gemini call (see app/prompts/explain_movement.txt for the prompt
-that will eventually replace this) — there is no sentiment analysis or text understanding here.
-Each factor is built directly from an actual disclosure's title (report_nm), so the content is
-real; only the positive/negative/neutral labeling is a heuristic tied to price direction, not
-derived from reading the filing. This keeps the response honest about what it actually knows.
+`generate_movement_explanation()` dispatches on `provider` ("solar" | "gemini") via
+`_PROVIDERS` below — see app/services/solar_client.py / gemini_client.py for how each builds
+its prompt from app/prompts/explain_movement.txt and enforces a JSON schema. The rule-based
+heuristic never calls an LLM — each factor is built directly from an actual DART disclosure's
+title (report_nm), so the content is real; only the positive/negative/neutral labeling is tied
+to price direction, not derived from reading the filing. Kept as the fallback for both
+providers so the API never breaks on a missing key or a provider-side failure.
 """
 
+import logging
+from pathlib import Path
+
+from app.core.config import settings
 from app.schemas.explanation import Factor, Source
+from app.services import gemini_client, solar_client
+
+logger = logging.getLogger(__name__)
 
 MAX_FACTORS = 3
 
+# provider name -> (client module, its error class, "is this provider's key configured?")
+_PROVIDERS = {
+    "solar": (solar_client, solar_client.SolarApiError, lambda: bool(settings.solar_api_key)),
+    "gemini": (gemini_client, gemini_client.GeminiApiError, lambda: bool(settings.gemini_api_key)),
+}
+
 _IMPACT_BY_DIRECTION = {"up": "positive", "down": "negative", "flat": "neutral"}
+
+_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "explain_movement.txt"
+_PROMPT_TEMPLATE = _PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _build_prompt(
+    ticker: str,
+    selected_date: str,
+    price: float,
+    change_percent: float,
+    volume_change_percent: float,
+    sources: list[Source],
+) -> str:
+    documents = "\n".join(
+        f"- id: {source.id} | type: {source.type} | title: {source.title} | "
+        f"publisher: {source.publisher} | published_at: {source.published_at}\n"
+        f"  excerpt: {source.excerpt}"
+        for source in sources
+    )
+    prompt = _PROMPT_TEMPLATE
+    for placeholder, value in {
+        "{ticker}": ticker,
+        "{selected_date}": selected_date,
+        "{price}": str(price),
+        "{change_percent}": str(change_percent),
+        "{volume_change_percent}": str(volume_change_percent),
+        "{retrieved_documents}": documents,
+    }.items():
+        prompt = prompt.replace(placeholder, value)
+    return prompt
+
+
+def _sanitize_factors(factors: list[Factor], sources: list[Source]) -> list[Factor]:
+    """Drop any source_ids an LLM cited that don't match a document we actually retrieved —
+    a hallucinated citation is worse than an unlinked factor.
+    """
+    known_ids = {source.id for source in sources}
+    return [
+        factor.model_copy(update={"source_ids": [sid for sid in factor.source_ids if sid in known_ids]})
+        for factor in factors
+    ]
 
 
 def generate_movement_explanation(
     ticker: str,
+    selected_date: str,
+    price: float,
+    change_percent: float,
+    volume_change_percent: float,
+    direction: str,
+    sources: list[Source],
+    provider: str = "solar",
+) -> dict:
+    if not sources:
+        return _no_sources_response(selected_date)
+
+    client, error_cls, has_key = _PROVIDERS.get(provider, (None, None, None))
+    if client is not None and has_key():
+        try:
+            prompt = _build_prompt(ticker, selected_date, price, change_percent, volume_change_percent, sources)
+            result = client.generate_movement_explanation(prompt)
+            result["factors"] = _sanitize_factors(result["factors"], sources)
+            return result
+        except error_cls as exc:
+            logger.warning(
+                "%s call failed for %s/%s, falling back to rule-based response: %s",
+                provider,
+                ticker,
+                selected_date,
+                exc,
+            )
+
+    return _rule_based_response(selected_date, change_percent, volume_change_percent, direction, sources)
+
+
+def _no_sources_response(selected_date: str) -> dict:
+    return {
+        "headline": "관련 DART 공시 자료를 찾지 못했습니다.",
+        "summary": (
+            f"선택 시점({selected_date}) 전후로 조회 가능한 DART 공시가 없어, 가격 변동과 "
+            "관련지을 수 있는 공개 자료를 확인하지 못했습니다."
+        ),
+        "confidence": "low",
+        "factors": [],
+        "limitations": [
+            "DART 공시 검색 결과가 없어 요인을 도출할 수 없습니다.",
+            "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다.",
+        ],
+    }
+
+
+def _rule_based_response(
     selected_date: str,
     change_percent: float,
     volume_change_percent: float,
     direction: str,
     sources: list[Source],
 ) -> dict:
-    if not sources:
-        return {
-            "headline": "관련 DART 공시 자료를 찾지 못했습니다.",
-            "summary": (
-                f"선택 시점({selected_date}) 전후로 조회 가능한 DART 공시가 없어, 가격 변동과 "
-                "관련지을 수 있는 공개 자료를 확인하지 못했습니다."
-            ),
-            "confidence": "low",
-            "factors": [],
-            "limitations": [
-                "DART 공시 검색 결과가 없어 요인을 도출할 수 없습니다.",
-                "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다.",
-            ],
-        }
-
     impact = _IMPACT_BY_DIRECTION.get(direction, "neutral")
     top_sources = sources[:MAX_FACTORS]
 

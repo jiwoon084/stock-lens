@@ -12,6 +12,10 @@ Given:
 Explain the likely factors behind the price movement on the selected date, using ONLY the
 retrieved documents as evidence. Do not speculate beyond what the documents support.
 
+Write every text field (headline, summary, factor titles/descriptions, limitations) in Korean
+(한국어) — the rest of this product's UI is Korean, so an English response would look broken to
+the user, even though this instruction and the field names below are in English.
+
 Respond with:
 - headline: one-sentence summary of the most likely driver
 - summary: 2-4 sentence explanation referencing the retrieved documents
@@ -20,6 +24,7 @@ Respond with:
 - limitations: caveats about what this analysis cannot prove (e.g. correlation vs causation,
   incomplete document coverage)
 
-NOTE: This prompt is not wired to a live LLM yet. app/services/llm_service.py currently returns
-a mock response with the same shape this prompt is expected to produce, so the API contract is
-already stable when a real SOLAR/Gemini call is added later.
+NOTE: Wired to live SOLAR and Gemini calls (app/services/solar_client.py,
+app/services/gemini_client.py) as of M3, chosen per-request via the `llm_provider` field.
+Falls back to app/services/llm_service.py's rule-based response if the chosen provider's key is
+unset or the call fails, so the API contract stays stable either way.

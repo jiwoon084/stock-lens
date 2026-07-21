@@ -1,7 +1,10 @@
+export type LlmProvider = "solar" | "gemini";
+
 export interface MovementExplanationRequest {
   ticker: string;
   selected_date: string;
   interval: string;
+  llm_provider: LlmProvider;
 }
 
 export type FactorImpact = "positive" | "negative" | "neutral";

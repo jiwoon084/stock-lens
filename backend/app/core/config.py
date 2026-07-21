@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     solar_api_key: str = ""
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-flash-latest"
     dart_api_key: str = ""
     krx_api_key: str = ""
 

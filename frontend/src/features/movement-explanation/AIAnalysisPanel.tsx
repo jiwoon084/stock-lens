@@ -1,6 +1,7 @@
-import type { MovementExplanationResponse } from "../../shared/types/explanation";
+import type { LlmProvider, MovementExplanationResponse } from "../../shared/types/explanation";
 import { ExplanationLoading } from "./ExplanationLoading";
 import { IssueChecklist } from "./IssueChecklist";
+import { LlmProviderToggle } from "./LlmProviderToggle";
 import type { ExplanationStatus } from "./useMovementExplanation";
 
 const CONFIDENCE_LABEL: Record<MovementExplanationResponse["confidence"], string> = {
@@ -22,10 +23,21 @@ interface AIAnalysisPanelProps {
   error: string | null;
   ticker: string;
   selectedDate: string | null;
+  llmProvider: LlmProvider;
+  onChangeProvider: (provider: LlmProvider) => void;
   onRetry: () => void;
 }
 
-export function AIAnalysisPanel({ status, data, error, ticker, selectedDate, onRetry }: AIAnalysisPanelProps) {
+export function AIAnalysisPanel({
+  status,
+  data,
+  error,
+  ticker,
+  selectedDate,
+  llmProvider,
+  onChangeProvider,
+  onRetry,
+}: AIAnalysisPanelProps) {
   return (
     <section className="ai-panel">
       <header className="ai-panel__header">
@@ -37,6 +49,8 @@ export function AIAnalysisPanel({ status, data, error, ticker, selectedDate, onR
         </div>
         <span className={`ai-panel__status ai-panel__status--${status}`}>{STATUS_LABEL[status]}</span>
       </header>
+
+      <LlmProviderToggle provider={llmProvider} onChange={onChangeProvider} />
 
       {status === "idle" && (
         <p className="empty-state">

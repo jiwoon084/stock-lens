@@ -31,10 +31,12 @@ def explain_movement(request: MovementExplanationRequest) -> MovementExplanation
     analysis = llm_service.generate_movement_explanation(
         ticker=request.ticker,
         selected_date=request.selected_date,
+        price=point.close,
         change_percent=point.change_percent,
         volume_change_percent=point.volume_change_percent,
         direction=direction,
         sources=sources,
+        provider=request.llm_provider,
     )
 
     return MovementExplanationResponse(

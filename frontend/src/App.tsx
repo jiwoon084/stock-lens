@@ -13,12 +13,14 @@ import { StockSelector } from "./features/stock-selector/StockSelector";
 import { useStocks } from "./features/stock-selector/useStocks";
 import { Card } from "./shared/components/Card";
 import { LoadingSpinner } from "./shared/components/LoadingSpinner";
+import type { LlmProvider } from "./shared/types/explanation";
 import type { PricePoint } from "./shared/types/stock";
 
 export default function App() {
   const [ticker, setTicker] = useState("005930");
   const [period, setPeriod] = useState<ChartPeriod>("all");
   const [chartType, setChartType] = useState<ChartType>("candle");
+  const [llmProvider, setLlmProvider] = useState<LlmProvider>("solar");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
 
   const stocks = useStocks();
@@ -38,11 +40,16 @@ export default function App() {
 
   function handleSelectPoint(point: PricePoint) {
     setSelectedPoint(point);
-    void explain(ticker, point.time, "1d");
+    void explain(ticker, point.time, "1d", llmProvider);
   }
 
   function handleRetry() {
-    if (selectedPoint) void explain(ticker, selectedPoint.time, "1d");
+    if (selectedPoint) void explain(ticker, selectedPoint.time, "1d", llmProvider);
+  }
+
+  function handleChangeProvider(provider: LlmProvider) {
+    setLlmProvider(provider);
+    if (selectedPoint) void explain(ticker, selectedPoint.time, "1d", provider);
   }
 
   return (
@@ -103,6 +110,8 @@ export default function App() {
             error={error}
             ticker={ticker}
             selectedDate={selectedPoint?.time ?? null}
+            llmProvider={llmProvider}
+            onChangeProvider={handleChangeProvider}
             onRetry={handleRetry}
           />
         </div>

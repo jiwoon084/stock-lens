@@ -7,6 +7,7 @@ class MovementExplanationRequest(BaseModel):
     ticker: str
     selected_date: str
     interval: str = "1d"
+    llm_provider: Literal["solar", "gemini"] = "solar"
 
 
 class Factor(BaseModel):

@@ -47,3 +47,37 @@ def test_explanation_contains_required_fields():
     body = response.json()
     for field in ("headline", "summary", "factors", "sources", "limitations"):
         assert field in body
+
+
+def test_explanation_accepts_gemini_as_llm_provider():
+    ticker = market_data_service.SAMPLE_STOCKS[0].ticker
+    selected_date = market_data_service.get_price_series(ticker)[-1].time
+
+    response = client.post(
+        "/api/v1/explanations",
+        json={
+            "ticker": ticker,
+            "selected_date": selected_date,
+            "interval": "1d",
+            "llm_provider": "gemini",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_explanation_rejects_unknown_llm_provider():
+    ticker = market_data_service.SAMPLE_STOCKS[0].ticker
+    selected_date = market_data_service.get_price_series(ticker)[-1].time
+
+    response = client.post(
+        "/api/v1/explanations",
+        json={
+            "ticker": ticker,
+            "selected_date": selected_date,
+            "interval": "1d",
+            "llm_provider": "gpt-4",
+        },
+    )
+
+    assert response.status_code == 422
