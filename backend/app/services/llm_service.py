@@ -1,15 +1,23 @@
-"""Movement analysis: SOLAR-pro2 -> Gemini Flash -> Groq (Llama 3.3) fallback.
+"""Movement analysis: routes each request to SOLAR-pro2 or Gemini Flash by difficulty.
 
-All three providers expose an OpenAI-compatible chat completions endpoint, so a single
+Not a fail-over chain — the two models split work by task difficulty. Requests backed by more
+evidence (> _SIMPLE_SOURCE_THRESHOLD sources — several disclosures/news to reconcile into one
+analysis) are harder to synthesize well, so they go to SOLAR-pro2 (stronger model); requests
+backed by few/no sources are simple enough for Gemini Flash (cheaper/faster). If the routed
+provider has no key or errors out, the other one is tried once as a same-request safety net
+before giving up to the mock — so a missing/invalid key never breaks the feature, but that
+fallback is a resilience measure, not the primary selection logic.
+
+Both providers expose an OpenAI-compatible chat completions endpoint, so a single
 `openai.OpenAI` client (pointed at a different base_url/api_key/model per provider) covers
-all of them — no provider-specific SDK needed. Retrieval (which documents count as evidence)
-stays the deterministic logic in retrieval_service.py/checklist_service.py; only the
-natural-language write-up here is LLM-generated, and the prompt only lets it cite source ids
-it was actually given (see app/prompts/explain_movement.txt) — this keeps the "출처 기반
-신뢰성" guarantee even once a real model is writing the prose.
+both — no provider-specific SDK needed. Retrieval (which documents count as evidence) stays the
+deterministic logic in retrieval_service.py/checklist_service.py; only the natural-language
+write-up here is LLM-generated, and the prompt only lets it cite source ids it was actually
+given (see app/prompts/explain_movement.txt) — this keeps the "출처 기반 신뢰성" guarantee even
+once a real model is writing the prose.
 
-If LLM_PROVIDER=mock, or every provider is missing a key, or all three error out, this falls
-back to a deterministic canned analysis so the feature never hard-fails for the user.
+If LLM_PROVIDER=mock, or both providers are missing a key/fail, this falls back to a
+deterministic canned analysis so the feature never hard-fails for the user.
 """
 
 import json
@@ -27,6 +35,7 @@ logger = logging.getLogger(__name__)
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "explain_movement.txt"
 _VALID_IMPACT = {"positive", "negative", "neutral"}
 _VALID_CONFIDENCE = {"low", "medium", "high"}
+_SIMPLE_SOURCE_THRESHOLD = 2  # 근거 자료가 이 개수 이하면 "쉬운 요청" -> Gemini Flash, 초과하면 "어려운 요청" -> SOLAR
 
 
 @dataclass(frozen=True)
@@ -37,17 +46,25 @@ class _Provider:
     model: str
 
 
-def _providers() -> list[_Provider]:
-    return [
-        _Provider("solar", settings.upstage_api_key, settings.solar_base_url, settings.solar_model),
-        _Provider(
-            "gemini",
-            settings.gemini_api_key,
-            "https://generativelanguage.googleapis.com/v1beta/openai/",
-            settings.gemini_model,
-        ),
-        _Provider("groq", settings.groq_api_key, "https://api.groq.com/openai/v1", settings.groq_model),
-    ]
+def _solar() -> _Provider:
+    return _Provider("solar", settings.upstage_api_key, settings.solar_base_url, settings.solar_model)
+
+
+def _gemini() -> _Provider:
+    return _Provider(
+        "gemini",
+        settings.gemini_api_key,
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+        settings.gemini_model,
+    )
+
+
+def _providers_for(num_sources: int) -> list[_Provider]:
+    """Returns [routed_provider, other_provider] — the second entry is only a same-request
+    fallback if the routed one is unavailable, not part of the difficulty routing itself."""
+    if num_sources <= _SIMPLE_SOURCE_THRESHOLD:
+        return [_gemini(), _solar()]
+    return [_solar(), _gemini()]
 
 
 def _documents_block(sources: list[Source]) -> str:
@@ -249,11 +266,11 @@ def generate_movement_explanation(
         prompt = _build_prompt(ticker, selected_date, price, change_percent, volume_change_percent, sources)
         valid_source_ids = {source.id for source in sources}
 
-        for provider in _providers():
+        for provider in _providers_for(len(sources)):
             result = _call_provider(provider, prompt, valid_source_ids)
             if result is not None:
                 return result
 
-        logger.warning("All LLM providers unavailable/failed for %s %s; falling back to mock.", ticker, selected_date)
+        logger.warning("Both LLM providers unavailable/failed for %s %s; falling back to mock.", ticker, selected_date)
 
     return _mock_analysis(selected_date, change_percent, volume_change_percent, direction, sources)

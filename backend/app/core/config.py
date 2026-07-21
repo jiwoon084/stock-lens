@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     port: int = 8080
     allowed_origins: str = "http://localhost:5173"
 
-    # "mock"이면 항상 mock 분석만 사용(테스트/오프라인용). 그 외("live" 등)면 아래 3단 폴백을 시도하고,
-    # 전부 실패하거나 키가 하나도 없으면 자동으로 mock으로 내려감.
+    # "mock"이면 항상 mock 분석만 사용(테스트/오프라인용). 그 외("live" 등)면 근거 자료 개수로
+    # SOLAR/Gemini Flash 중 하나로 라우팅하고(app/services/llm_service.py), 그 provider가 키가
+    # 없거나 실패하면 나머지 하나를 안전망으로 시도, 둘 다 안 되면 mock으로 내려감.
     llm_provider: str = "mock"
     llm_timeout: int = 30
     llm_num_retries: int = 2
@@ -26,9 +27,6 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-flash-latest"
-
-    groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
 
     dart_api_key: str = ""
     krx_api_key: str = ""

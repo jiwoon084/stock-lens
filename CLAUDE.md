@@ -56,9 +56,10 @@ backend/    FastAPI (routes → schemas/services → core/config 3계층)
   app/api/routes/     health.py, stocks.py, explanations.py, checklist.py
   app/services/       market_data_service.py(공식 KRX API, 없으면 mock), krx_price_client.py
                       (data.go.kr 금융위원회_주식시세정보, 요청마다 실시간 호출 + 당일 in-process
-                      캐시), retrieval_service.py(disclosures.json 실제 DART 공시 + 실제 본문 발췌
-                      + 루틴성 공시 필터링, 없으면 mock), llm_service.py(SOLAR→Gemini→Groq 3단
-                      폴백, 실제 LLM), checklist_service.py(news.json 실제 뉴스, 없으면 mock),
+                      캐시), retrieval_service.py(disclosures.json 실제 DART 공시 + news.json 실제
+                      뉴스를 날짜 근접도로 섞어서 근거로 사용, 실제 본문 발췌 + 루틴성 공시 필터링,
+                      둘 다 없으면 mock), llm_service.py(근거 자료 개수로 SOLAR/Gemini Flash 라우팅,
+                      실제 LLM), checklist_service.py(news.json 실제 뉴스, 없으면 mock),
                       explanation_service.py(위 서비스 조합)
   app/agent/          LangGraph 스켈레톤 (state.py/nodes.py/graph.py, 현재 TODO 스텁, 손 안 댐)
   app/prompts/        explain_movement.txt (LLM 프롬프트 — [id] 인용 강제로 할루시네이션 방지)
@@ -128,21 +129,33 @@ git 히스토리(커밋 `7760d32`~`0a71d36`)에서 다시 꺼내와 적용함.
   2025-07-23~2026-07-21 전체 커버(1331건).
 - 차트 확대/축소 버그 수정: `PriceChart.tsx`에 `handleScroll: false, handleScale: false` — 마우스
   휠/드래그로 실수로 확대·이동되는 것을 막아 기간 탭으로만 범위가 바뀌게 함.
-- **M3 완료(SOLAR) / Gemini·Groq 키 대기**: `llm_service.py`가 **SOLAR-pro2 → Gemini Flash →
-  Groq(Llama 3.3 70B) 3단 폴백**으로 실제 LLM을 호출함(전부 OpenAI 호환 엔드포인트라 `openai`
-  패키지 하나로 처리). 프롬프트가 검색된 문서를 `[id]`로 주고 그 id만 인용하게 강제해 할루시네이션
-  방지. SOLAR는 실제 동작 확인(공시를 읽고 근거 없는 요인은 `source_ids: []`로 스스로 구분).
-  Gemini/Groq는 키 없어서 자동 skip — 채워지면 코드 변경 없이 활성화됨. `LLM_PROVIDER=mock`이면
-  mock만 사용(테스트에서 강제 — `backend/tests/conftest.py`). retrieval은 여전히 결정론적 로직
-  그대로 두고 LLM은 생성 단계에만 사용 — 표준 RAG, "출처 기반 신뢰성" 원칙과 일치.
+- **M3 완료(SOLAR) / Gemini는 키 대기 — 2026-07-22에 아키텍처를 "3단 폴백"에서 "난이도 기반
+  2단 라우팅"으로 변경**: `llm_service.py`가 이제 **폴백 체인이 아니라 근거 자료 개수로 SOLAR-pro2 /
+  Gemini Flash 중 하나를 고름** — 근거가 `_SIMPLE_SOURCE_THRESHOLD`(2)개 초과면 "어려운 요청"으로
+  보고 SOLAR-pro2, 그 이하면 "쉬운 요청"으로 보고 Gemini Flash. 라우팅된 쪽이 키가 없거나 실패하면
+  나머지 하나를 그 요청에 한해 안전망으로 시도(순수 폴백 아님, 라우팅 실패 시 보정용). **Groq는
+  완전히 제거함**(3단 → 2단). 전부 OpenAI 호환 엔드포인트라 `openai` 패키지 하나로 처리. 프롬프트가
+  검색된 문서를 `[id]`로 주고 그 id만 인용하게 강제해 할루시네이션 방지. SOLAR는 실제 동작 확인(공시를
+  읽고 근거 없는 요인은 `source_ids: []`로 스스로 구분). **Gemini는 아직 키 없어서 자동으로 SOLAR로
+  대체됨** — 채워지면 코드 변경 없이 실제 라우팅이 활성화됨. `LLM_PROVIDER=mock`이면 mock만 사용
+  (테스트에서 강제 — `backend/tests/conftest.py`). 라우팅 로직 자체는 `backend/tests/test_llm_service.py`
+  로 고정해둠(`_providers_for()`가 임계값 안팎에서 정확히 [gemini, solar] / [solar, gemini] 순서를
+  반환하는지). retrieval은 여전히 결정론적 로직 그대로 두고 LLM은 생성 단계에만 사용 — 표준 RAG,
+  "출처 기반 신뢰성" 원칙과 일치.
   ⚠️ `Settings.env_file`이 상대경로 `.env`였던 버그도 고침(둘 다 독립적으로 이 버그를 발견·수정함 —
   절대경로로 고정).
+- **retrieval_service.py에 뉴스도 섞임 (2026-07-22)**: 원래 DART 공시만 근거로 썼는데,
+  `data/news.json`(네이버 뉴스)도 같이 불러와서 공시 최대 3건 + 뉴스 최대 2건(한쪽이 모자라면
+  상대가 채움)을 합친 뒤 선택 날짜와 가까운 순으로 재정렬. **주의**: 네이버 뉴스 API는 과거 특정
+  날짜 검색을 지원 안 해서 항상 "오늘" 기사만 가져옴 — 오래된 날짜를 클릭하면 뉴스가 "관련 자료"엔
+  뜨지만 실제로 무관한 경우가 많아 LLM이 "주요 요인"에는 인용을 안 할 수 있음(이건 버그 아니라
+  "출처 기반 신뢰성" 원칙대로 정직하게 동작하는 것 — 사용자에게 이미 설명하고 확인받음).
 
 **향후 마일스톤 (docs/project-plan.md):**
 - M1: ~~실제 시세 연동~~ → **완료** (공식 KRX API)
-- M2: ~~실제 검색(공시·뉴스) 연동~~ → **완료** (실제 본문 발췌까지 포함)
-- M3: SOLAR 실제 연동 **완료**. Gemini/Groq 키 발급 대기 중 — 발급되면 `.env`에 `GEMINI_API_KEY`,
-  `GROQ_API_KEY`만 채워 넣으면 코드 변경 없이 3단 폴백이 자동으로 완성됨.
+- M2: ~~실제 검색(공시·뉴스) 연동~~ → **완료** (실제 본문 발췌 + 뉴스 통합까지 포함)
+- M3: SOLAR 실제 연동 **완료**, 2단 난이도 라우팅 구조로 확정. Gemini 키 발급 대기 중 — 발급되면
+  `.env`에 `GEMINI_API_KEY`만 채워 넣으면 코드 변경 없이 라우팅이 완성됨.
 - M4: GCP 배포 — `infra/gcp-setup.md`의 1회성 설정 완료 후 `deploy.yml` 실행 (Cloud Run 기준으로
   작성돼 있어 GCE 확정에 맞춰 다시 손봐야 함)
 
@@ -156,8 +169,8 @@ git 히스토리(커밋 `7760d32`~`0a71d36`)에서 다시 꺼내와 적용함.
 - **시세 데이터: 팀원 것(공식 KRX API) 채택** — pykrx의 ToS 리스크를 팀원이 먼저 지적했고, 이미
   실제 키로 검증까지 끝내둔 상태였음. `data/step4_prices.py`·`market_data.sqlite3`는 완전히 삭제.
 - **공시 검색: 병합** — 내 1년 창 + 팀원의 실제 본문 발췌/루틴 필터링 로직.
-- **LLM: 내 것(SOLAR/Gemini/Groq 3단 실제 폴백) 유지** — 팀원 건 아직 heuristic mock 수준이라
-  명백히 내 것이 더 발전됨.
+- **LLM: 내 것(당시 SOLAR/Gemini/Groq 3단 실제 폴백) 유지** — 팀원 건 아직 heuristic mock 수준이라
+  명백히 내 것이 더 발전됨. (2026-07-22에 3단 폴백 → 2단 난이도 라우팅으로 변경, 위 참고)
 - **부가 기능/문서: 팀원 것 그대로 채택** — `step3_major_events.py`, docs/*.md, README.md,
   deploy.yml 시크릿 추가, compose.yaml, infra/* 전부 병합함(우리 작업과 충돌 없음).
 - 병합 후 백엔드 테스트 14개(8+팀원 6개) 전부 통과, 프론트 빌드 정상, 실제 KRX API로 시세 조회
@@ -213,11 +226,12 @@ Docker+GCE)의 인프라 패턴을 그대로 재사용하기로 확정함:
 2. ~~M1(실제 시세)~~ → **완료** (공식 KRX API, 8번 병합 참고). ~~M2(공시·뉴스 실제 연동)~~ →
    **완료**(NAVER_CLIENT_ID/SECRET 발급 완료 + 실행 검증까지 끝남, retrieval_service는 병합으로
    본문 발췌까지 고도화됨).
-3. ~~M3(SOLAR/Gemini/Groq 실제 LLM)~~ → **SOLAR 완료, Gemini/Groq 키 발급 대기 중** (developers 콘솔
-   가입 안내는 이전 대화 참고 — Gemini: aistudio.google.com/apikey, Groq: console.groq.com).
-   받으면 `.env`에 `GEMINI_API_KEY`/`GROQ_API_KEY`만 채우면 끝.
+3. ~~M3(SOLAR/Gemini 실제 LLM)~~ → **SOLAR 완료, 난이도 기반 2단 라우팅 구조 확정(Groq 제거,
+   2026-07-22)**. Gemini는 아직 키 발급 대기 중 — aistudio.google.com/apikey 에서 발급 후 `.env`에
+   `GEMINI_API_KEY`만 채우면 끝(코드 변경 불필요).
 4. GCP/GCE 배포(M4)는 아직 전혀 준비 안 됨 — `infra/gcp-setup.md`/`deploy.yml`이 Cloud Run 기준으로
    작성돼 있어 GCE로 다시 손봐야 함.
 5. Supabase/Upstage 키는 이미 `.env`에 채워짐(2026-07-21) — 실제 Supabase 연동 코드는 아직 안 짬.
-6. 정영준님이 프론트를 별도로 더 작업한다면, 8번에서 확정한 목업 기준 구조로
-   맞춰야 함 — 병합 시 충돌 나면 이 구조가 우선.
+6. 정영준님이 프론트를 별도로 더 작업한다면, **2번(2026-07-21 대시보드 UI 전환 재확정)에서
+   확정한 대시보드 구조**로 맞춰야 함 — 병합 시 충돌 나면 이 구조가 우선. (8번 병합 당시엔
+   "내 프론트 유지"였다가 2번에서 다시 뒤집혔으니, 8번보다 2번/4번이 최신 상태.)
