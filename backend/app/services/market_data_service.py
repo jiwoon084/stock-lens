@@ -16,8 +16,7 @@ SAMPLE_STOCKS: list[Stock] = [
     Stock(ticker="005380", name="현대차", market="KOSPI"),
 ]
 
-_LATEST_TRADING_DAY = date(2026, 7, 17)
-_TRADING_DAYS = 30
+_TRADING_DAYS = 250  # 차트 표시 기간(1년)에 맞춤 — krx_price_client.TRADING_DAYS와 동일하게 유지
 
 
 def _business_days_ending(end: date, count: int) -> list[date]:
@@ -64,7 +63,7 @@ def get_price_series(ticker: str) -> list[PricePoint]:
 
 def _generate_mock_price_series(ticker: str) -> list[PricePoint]:
     rng = random.Random(f"stock-lens-{ticker}")
-    trading_days = _business_days_ending(_LATEST_TRADING_DAY, _TRADING_DAYS)
+    trading_days = _business_days_ending(date.today(), _TRADING_DAYS)
 
     price = _base_price_for(ticker)
     prev_close = price

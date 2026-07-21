@@ -120,11 +120,20 @@ cp .env.example .env
 
 - `VITE_API_BASE_URL` — 프론트엔드가 호출할 백엔드 주소 (로컬 기본값: `http://localhost:8000`)
 - `ALLOWED_ORIGINS` — 백엔드 CORS 허용 origin (로컬 기본값: `http://localhost:5173`)
-- `SOLAR_API_KEY`, `GEMINI_API_KEY`, `LLM_PROVIDER=mock` — 현재는 사용되지 않는 자리 표시자 (실제 키를 채우거나 커밋하지 마세요)
+- `SOLAR_API_KEY`, `GEMINI_API_KEY` — **둘 다 실제로 사용됨**. 프론트엔드의 SOLAR/Gemini
+  선택 버튼(`LlmProviderToggle`)으로 고른 쪽의 키를 `llm_service.py`가 사용합니다(기본값
+  SOLAR). Gemini는 모델명을 `GEMINI_MODEL`(기본 `gemini-flash-latest` — Google이 관리하는
+  "항상 최신 무료 Flash 모델" 별칭. `gemini-2.5-flash`처럼 날짜 박힌 이름은 신규 키에서
+  404/유료 전환될 수 있어서 별칭을 기본값으로 씀)로 바꿀 수 있습니다. 키가 없거나 호출이
+  실패해도 앱이 죽지 않고 실제 검색된 자료 기반의 규칙 기반 분석으로 폴백합니다.
 - `DART_API_KEY` — **실제로 사용됨**. [Open DART](https://opendart.fss.or.kr)에서 무료로 발급받은 키를 넣으면
   `data/step1_corpcode.py` → `step2_disclosures.py` → `step3_major_events.py` 실행과, 백엔드의
   실시간 공시 본문/구조화 이벤트 조회(`retrieval_service.py`)에 쓰입니다. 키가 없으면 앱이 죽지
-  않고 그냥 "관련 DART 공시 자료를 찾지 못했습니다"로 정직하게 응답합니다.
+  않고 그냥 "관련 공시·뉴스 자료를 찾지 못했습니다"로 정직하게 응답합니다.
+- `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` — **실제로 사용됨**. [Naver Developers](https://developers.naver.com)
+  에서 발급받은 키를 넣으면 `data/step5_news.py`가 종목별 실제 뉴스를 `data/news.json`에
+  수집합니다. `retrieval_service.py`(AI 분석 출처)와 "오늘의 체크리스트"(`checklist_service.py`)
+  둘 다 이 데이터를 씁니다. 키가 없어도 스크립트만 못 돌리는 것이고 서비스는 mock으로 폴백합니다.
 - `KRX_API_KEY` — **실제로 사용됨**. [data.go.kr](https://www.data.go.kr)에서 "금융위원회_주식시세정보"
   API를 활용신청하면 받는 "일반 인증키(Decoding)"를 넣으세요. `market_data_service.py`가 요청마다
   실시간으로 KRX 일별 시세를 가져오는 데 씁니다 (같은 날 반복 요청은 캐시). 키가 없거나 호출이
@@ -163,15 +172,23 @@ Artifact Registry, Workload Identity Federation, Secret Manager, GitHub Reposito
 
 ## 현재 구현 범위
 
-- 종목 선택, 종목 헤더(현재가/등락), 차트 표시, 차트 클릭 시 팝오버 + 우측 체크리스트 동시 갱신
-- 체크리스트: 체크박스, 호재/유의/중립 태그, 출처 펼치기, 확인 완료 진행률, 용어 강조(호버 툴팁만, 클릭 동작 없음)
-- **DART 공시 실데이터**: 5개 종목 실제 공시 목록(`data/disclosures.json`) + 실시간 본문 발췌
-  (`document.xml`, XML/HTML 두 형식 모두 처리) + 구조화 이벤트(자기주식처분결정/유상증자결정)
+- **Koyfin/Perplexity 스타일 대시보드 UI**: 상단바 → 종목 선택 + StockHeader(현재가/등락률) →
+  캔들/라인 토글 가능한 주가 차트(`ChartTypeToggle`, 클릭 시 선택 정보 표시) → "주목할 만한
+  가격변동"(등락률 상위 카드) → 우측 "AI 분석 리포트"(요인 체크리스트 + SOLAR/Gemini 선택
+  버튼) + "오늘의 체크리스트"(실제 뉴스 기반, 체크박스/태그/출처 건수/원문 링크/확인 진행률)
+- **DART 공시 실데이터**: 5개 종목 실제 공시 목록(`data/disclosures.json`, 1년치) + 실시간 본문
+  발췌(`document.xml`, XML/HTML 두 형식 모두 처리) + 구조화 이벤트(자기주식처분결정/유상증자결정)
   까지 연동. 행정성 보고서(임원 소유상황 등)는 후순위 우선순위 규칙으로 처리
+- **네이버 뉴스 실데이터**: `data/step5_news.py`로 종목별 실제 기사 수집(`data/news.json`).
+  AI 분석 출처와 "오늘의 체크리스트" 둘 다 이 데이터를 사용
 - **KRX 실 시세 데이터**: data.go.kr "금융위원회_주식시세정보"로 요청마다 실시간 조회
-  (`app/services/krx_price_client.py`, 2026-07-21 실 키로 필드 매핑 검증 완료). 키가 없거나
-  호출이 실패하면 mock 시세로 자동 폴백 — 자세한 내용은 [docs/project-plan.md](docs/project-plan.md) M1 참고
-- 프론트엔드-백엔드 API 계약 (snake_case로 통일, 변환 로직 없음) — 스키마는 초기와 동일, 내용만 실데이터로 교체됨
+  (`app/services/krx_price_client.py`, 1년치 250거래일). 키가 없거나 호출이 실패하면 mock
+  시세로 자동 폴백 — 자세한 내용은 [docs/project-plan.md](docs/project-plan.md) M1 참고
+- **SOLAR/Gemini 실 LLM 연동**: 사용자가 버튼으로 직접 고를 수 있음(기본 SOLAR). 실제 검색된
+  공시/뉴스만 근거로 쓰도록 프롬프트가 `[id]` 인용을 강제하고, 인용 안 된 id는 응답 단계에서도
+  한 번 더 걸러냄(`llm_service._sanitize_factors`). 키가 없거나 호출 실패 시 실제 자료 기반의
+  규칙 기반 분석으로 폴백 — 자세한 내용은 [docs/project-plan.md](docs/project-plan.md) M3 참고
+- 프론트엔드-백엔드 API 계약 (snake_case로 통일, 변환 로직 없음)
 - 로컬 실행 (venv/npm, Docker Compose, `data/` 볼륨 마운트로 실데이터도 로컬 Docker에서 동작)
 - Docker 빌드 (frontend/backend 모두 로컬에서 build 및 실행 검증 완료)
 - GitHub Actions CI(lint/build/test/docker build) — 실행 여부는 GitHub 저장소에 push 후 Actions 탭에서 확인 필요
@@ -180,11 +197,7 @@ Artifact Registry, Workload Identity Federation, Secret Manager, GitHub Reposito
 ## 향후 구현 예정 항목
 
 - 나머지 DART 이벤트 유형 구조화 (자기주식취득결정 등 — 지금 5개 종목 데이터엔 해당 사례가 없어 미검증)
-- 뉴스 연동 (네이버 금융 등 — 크롤링 vs 뉴스 API 소스 결정 필요)
 - 한경 컨센서스 등 증권사 리서치 리포트 연동
-- SOLAR/Gemini 실제 LLM 호출 연동 (`llm_service.py`는 여전히 규칙 기반 — 실제 문서를 가져오는
-  건 완료됐지만 "요약/호재·유의 판단"은 아직 방향(등락) 기반 추정일 뿐, 실제 해석은 아님).
-  `app/prompts/explain_movement.txt` + `backend/app/agent/`의 LangGraph 스켈레톤 참고
 - 이벤트 마커, 분석 결과 캐싱, 모바일 반응형 (`docs/requirements.md`의 Should)
 - 종목 비교, 후속 질문, 분석 기록 저장 (`docs/requirements.md`의 Could)
 - 실제 GCP 프로젝트에서의 배포 검증

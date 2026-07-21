@@ -106,14 +106,21 @@ reachable; only the schema shape below is guaranteed.
 {
   "ticker": string,
   "selected_date": "YYYY-MM-DD",
-  "interval": string   // e.g. "1d"; currently unused by the mock but part of the contract
+  "interval": string,               // e.g. "1d"; currently unused but part of the contract
+  "llm_provider": "solar" | "gemini" // optional, defaults to "solar" if omitted
 }
 ```
+
+`llm_provider` picks which real LLM writes the analysis (see `app/services/solar_client.py` /
+`gemini_client.py`) — falls back to the deterministic rule-based response if that provider's
+API key is unset or the call fails, so a missing key or provider outage never causes a 4xx/5xx.
+An unrecognized value (anything other than `"solar"`/`"gemini"`) returns **422** (FastAPI's
+standard request-validation error).
 
 **Request example**
 
 ```json
-{ "ticker": "005930", "selected_date": "2026-07-15", "interval": "1d" }
+{ "ticker": "005930", "selected_date": "2026-07-15", "interval": "1d", "llm_provider": "gemini" }
 ```
 
 **Response schema**
@@ -197,15 +204,12 @@ fabricated one):
   "change_percent": -2.65,
   "volume_change_percent": 236.58,
   "direction": "down",
-  "headline": "관련 DART 공시 자료를 찾지 못했습니다.",
-  "summary": "선택 시점(2026-07-17) 전후로 조회 가능한 DART 공시가 없어, 가격 변동과 관련지을 수 있는 공개 자료를 확인하지 못했습니다.",
+  "headline": "관련 공시·뉴스 자료를 찾지 못했습니다.",
+  "summary": "선택 시점(2026-07-17) 전후로 조회 가능한 DART 공시나 뉴스가 없어, 가격 변동과 관련지을 수 있는 공개 자료를 확인하지 못했습니다.",
   "confidence": "low",
   "factors": [],
   "sources": [],
-  "limitations": [
-    "DART 공시 검색 결과가 없어 요인을 도출할 수 없습니다.",
-    "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다."
-  ]
+  "limitations": ["관련 공시·뉴스 검색 결과가 없어 요인을 도출할 수 없습니다."]
 }
 ```
 
@@ -216,8 +220,42 @@ fabricated one):
 ```
 
 **Error (400)** — ticker is known but has no price data for `selected_date` (e.g. a weekend,
-or a date outside the mock's 30-day window)
+or a date outside the currently-available range — 250 trading days/~1 year when `KRX_API_KEY`
+is set, 30 for the offline mock fallback)
 
 ```json
 { "detail": "No price data for 005930 on 2020-01-01" }
+```
+
+---
+
+## GET /api/v1/stocks/{ticker}/checklist
+
+Returns "오늘의 체크리스트" — today's news for the ticker, pre-tagged for the beginner-investor
+checklist UI (`frontend/src/features/article-checklist/`). Backed by real Naver News articles
+in `data/news.json` (see `data/step5_news.py`, M2) when present; otherwise falls back to mock
+checklist items so the endpoint never 500s.
+
+**Response schema**
+
+```
+{
+  "ticker": string,
+  "date": "YYYY-MM-DD",
+  "total_article_count": integer,
+  "items": [{
+    "id": string,
+    "tag": "positive" | "negative" | "earnings" | "caution" | "neutral",
+    "headline": string,
+    "description": string,
+    "source_count": integer,
+    "url": string
+  }]
+}
+```
+
+**Error (404)** — unknown ticker
+
+```json
+{ "detail": "Unknown ticker: 999999" }
 ```

@@ -23,4 +23,16 @@
   --spacing-md: 16px;
   --spacing-lg: 24px;
   --spacing-xl: 32px;
+
+  /* 오늘의 체크리스트 태그 색상 */
+  --tag-positive-bg: rgba(16, 163, 74, 0.1);
+  --tag-positive-text: #0f7a37;
+  --tag-negative-bg: var(--color-positive-soft);
+  --tag-negative-text: var(--color-positive);
+  --tag-earnings-bg: rgba(217, 119, 6, 0.12);
+  --tag-earnings-text: #b45309;
+  --tag-caution-bg: var(--color-positive-soft);
+  --tag-caution-text: var(--color-positive);
+  --tag-neutral-bg: var(--color-neutral-soft);
+  --tag-neutral-text: var(--color-neutral);
 }

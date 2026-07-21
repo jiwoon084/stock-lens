@@ -11,6 +11,7 @@ import { useMovementExplanation } from "./features/movement-explanation/useMovem
 import { MarketEventsPanel } from "./features/market-events/MarketEventsPanel";
 import { StockSelector } from "./features/stock-selector/StockSelector";
 import { useStocks } from "./features/stock-selector/useStocks";
+import { ArticleChecklist } from "./features/article-checklist/ArticleChecklist";
 import { Card } from "./shared/components/Card";
 import { LoadingSpinner } from "./shared/components/LoadingSpinner";
 import type { LlmProvider } from "./shared/types/explanation";
@@ -114,6 +115,10 @@ export default function App() {
             onChangeProvider={handleChangeProvider}
             onRetry={handleRetry}
           />
+
+          <Card title="오늘의 체크리스트">
+            <ArticleChecklist ticker={ticker} />
+          </Card>
         </div>
       </div>
     </div>

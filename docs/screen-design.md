@@ -37,21 +37,27 @@ panel below the chart borrows Perplexity Finance's "notable moves" card row.
 | `StockSelector` | `features/stock-selector/StockSelector.tsx` | receives `stocks` as a prop, calls `onSelect(ticker)` |
 | `StockHeader` | `features/price-chart/StockHeader.tsx` | pure display of name/market/code + latest close, change, and "업데이트 기준" date, derived from `prices` (unfiltered by period) |
 | `ChartToolbar` | `features/price-chart/ChartToolbar.tsx` | period (`1w`/`2w`/`1m`/`all`), filters prices client-side; rendered as the chart card's header action |
-| `PriceChart` | `features/price-chart/PriceChart.tsx` | renders candlesticks, emits click → `PricePoint`, marks the selected time with a chart marker (no embedded popover) |
+| `ChartTypeToggle` | `features/price-chart/ChartTypeToggle.tsx` | candle/line switch (icon buttons next to the chart card title); swaps the lightweight-charts series in place, keeps zoom + selection marker |
+| `PriceChart` | `features/price-chart/PriceChart.tsx` | renders candlesticks or a line/area series depending on `chartType`, emits click → `PricePoint`, marks the selected time with a chart marker (no embedded popover) |
 | `SelectedPointInfo` | `features/price-chart/SelectedPointInfo.tsx` | pure display strip under the chart: selected date's price/등락률/거래량, or an idle hint |
-| `AIAnalysisPanel` | `features/movement-explanation/AIAnalysisPanel.tsx` | report container — idle/loading/error/success states, header (status pill + ticker/date), headline, summary, confidence, delegates factor list to `IssueChecklist`, renders limitations |
+| `AIAnalysisPanel` | `features/movement-explanation/AIAnalysisPanel.tsx` | report container — idle/loading/error/success states, header (status pill + ticker/date), `LlmProviderToggle`, headline, summary, confidence, delegates factor list to `IssueChecklist`, renders limitations |
+| `LlmProviderToggle` | `features/movement-explanation/LlmProviderToggle.tsx` | SOLAR/Gemini switch; changing it re-runs `explain()` for the currently-selected date if one is selected |
 | `IssueChecklist` | `features/movement-explanation/IssueChecklist.tsx` | pure display of a given `data`'s factors, plus local (non-persisted) checkbox/expand state |
 | `ExplanationLoading` | `features/movement-explanation/ExplanationLoading.tsx` | skeleton placeholder (shimmer bars) shown only on the *first* load for a ticker (no prior data to keep visible) |
 | `MarketEventsPanel` | `features/market-events/MarketEventsPanel.tsx` | "주목할 만한 가격변동" card row (derived client-side from `prices` via `selectNotableMovements`, no extra API calls) + a "선택한 날짜의 관련 자료" sub-panel driven by the same explanation state as the AI panel |
 | `EventCard` | `features/market-events/EventCard.tsx` | one notable-movement card (date/방향/등락률/거래량 변화); click reselects that date, same as clicking the chart |
 | `SourceCard` | `features/market-events/SourceCard.tsx` | one `Source` (news/disclosure/report) card — type badge, date, title, excerpt, publisher, links out |
+| `ArticleChecklist` | `features/article-checklist/ArticleChecklist.tsx` | "오늘의 체크리스트" — independent of chart selection, always shows today's news-derived checklist for the current `ticker` via its own `useArticleChecklist` hook; sits below `AIAnalysisPanel`, not wired to `selectedPoint` |
 
-`App.tsx` owns `ticker`, `period`, and `selectedPoint` state, and the `useMovementExplanation`
-hook's `status/data/error/reset`. Selecting a chart point *or* an event card synchronously
-updates `selectedPoint` and triggers the same `explain()` call — there is no separate "요청"
-button, and both entry points feed the same state so the chart marker, the selected event card,
-and the AI panel's date all move together. Changing `ticker` resets both `selectedPoint` and the
-explanation state (`reset()`), so no stale result from a previous stock lingers.
+`App.tsx` owns `ticker`, `period`, `chartType`, `llmProvider`, and `selectedPoint` state, plus
+the `useMovementExplanation` hook's `status/data/error/reset`. Selecting a chart point *or* an
+event card synchronously updates `selectedPoint` and triggers the same `explain()` call (now
+also passing `llmProvider`) — there is no separate "요청" button, and both entry points feed the
+same state so the chart marker, the selected event card, and the AI panel's date all move
+together. Switching `llmProvider` re-issues `explain()` immediately if a date is already
+selected, so the same date's report can be compared across providers. Changing `ticker` resets
+both `selectedPoint` and the explanation state (`reset()`), so no stale result from a previous
+stock lingers.
 
 ## States explicitly covered
 

@@ -32,6 +32,13 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "explain_mov
 _PROMPT_TEMPLATE = _PROMPT_PATH.read_text(encoding="utf-8")
 
 
+def _documents_block(sources: list[Source]) -> str:
+    return "\n".join(
+        f"- [{source.id}] ({source.type}, {source.published_at[:10]}) {source.title}: {source.excerpt}"
+        for source in sources
+    )
+
+
 def _build_prompt(
     ticker: str,
     selected_date: str,
@@ -40,23 +47,14 @@ def _build_prompt(
     volume_change_percent: float,
     sources: list[Source],
 ) -> str:
-    documents = "\n".join(
-        f"- id: {source.id} | type: {source.type} | title: {source.title} | "
-        f"publisher: {source.publisher} | published_at: {source.published_at}\n"
-        f"  excerpt: {source.excerpt}"
-        for source in sources
+    return _PROMPT_TEMPLATE.format(
+        ticker=ticker,
+        selected_date=selected_date,
+        price=price,
+        change_percent=change_percent,
+        volume_change_percent=volume_change_percent,
+        retrieved_documents=_documents_block(sources),
     )
-    prompt = _PROMPT_TEMPLATE
-    for placeholder, value in {
-        "{ticker}": ticker,
-        "{selected_date}": selected_date,
-        "{price}": str(price),
-        "{change_percent}": str(change_percent),
-        "{volume_change_percent}": str(volume_change_percent),
-        "{retrieved_documents}": documents,
-    }.items():
-        prompt = prompt.replace(placeholder, value)
-    return prompt
 
 
 def _sanitize_factors(factors: list[Factor], sources: list[Source]) -> list[Factor]:
@@ -104,17 +102,14 @@ def generate_movement_explanation(
 
 def _no_sources_response(selected_date: str) -> dict:
     return {
-        "headline": "관련 DART 공시 자료를 찾지 못했습니다.",
+        "headline": "관련 공시·뉴스 자료를 찾지 못했습니다.",
         "summary": (
-            f"선택 시점({selected_date}) 전후로 조회 가능한 DART 공시가 없어, 가격 변동과 "
+            f"선택 시점({selected_date}) 전후로 조회 가능한 DART 공시나 뉴스가 없어, 가격 변동과 "
             "관련지을 수 있는 공개 자료를 확인하지 못했습니다."
         ),
         "confidence": "low",
         "factors": [],
-        "limitations": [
-            "DART 공시 검색 결과가 없어 요인을 도출할 수 없습니다.",
-            "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다.",
-        ],
+        "limitations": ["관련 공시·뉴스 검색 결과가 없어 요인을 도출할 수 없습니다."],
     }
 
 
@@ -140,7 +135,7 @@ def _rule_based_response(
 
     headline = f"'{top_sources[0].title}' 공시가 이 시점 가격 변동과 관련이 있을 수 있습니다."
     summary = (
-        f"선택 시점({selected_date}) 전후 {len(sources)}건의 DART 공시 중 등락률 "
+        f"선택 시점({selected_date}) 전후 {len(sources)}건의 자료 중 등락률 "
         f"{change_percent:+.2f}%, 거래량 변화 {volume_change_percent:+.2f}%와 시점상 가까운 "
         f"{len(top_sources)}건을 관련 요인으로 정리했습니다."
     )
@@ -148,9 +143,8 @@ def _rule_based_response(
     confidence = "medium" if abs(change_percent) >= 1.5 else "low"
 
     limitations = [
-        "공시 제목과 접수일만으로 가격 변동의 직접적인 인과관계를 확정할 수 없습니다.",
-        "호재/유의/중립 표시는 실제 공시 내용을 분석한 것이 아니라, 등락 방향에 따른 단순 추정입니다.",
-        "뉴스·리서치 리포트 등 다른 자료는 아직 연동되지 않았습니다.",
+        "공시/기사 제목과 접수일만으로 가격 변동의 직접적인 인과관계를 확정할 수 없습니다.",
+        "호재/유의/중립 표시는 실제 내용을 분석한 것이 아니라, 등락 방향에 따른 단순 추정입니다.",
     ]
 
     return {

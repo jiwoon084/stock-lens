@@ -100,6 +100,10 @@ export function PriceChart({ prices, selectedTime, chartType, onSelectPoint }: P
         priceFormatter: (price: number) => Math.round(price).toLocaleString("ko-KR"),
       },
       autoSize: true,
+      // 마우스 휠로 페이지를 스크롤하다 차트 위에서 의도치 않게 확대/축소·이동되는 것을 방지 —
+      // 기간 탭(1주/2주/1개월/전체)으로만 범위를 바꾸도록 고정.
+      handleScroll: false,
+      handleScale: false,
     });
 
     chart.subscribeClick((param) => {

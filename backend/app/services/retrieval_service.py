@@ -1,9 +1,11 @@
 """Document retrieval backed by real DART disclosures.
 
 Reads data/disclosures.json (produced by data/step1_corpcode.py + data/step2_disclosures.py,
-run manually with a real DART_API_KEY — see docs/project-plan.md M2). Falls back to an empty
-list if that file doesn't exist yet (e.g. in Docker, where data/ isn't copied into the image),
-so the API stays usable without crashing — the response will just have no sources for that case.
+run manually with a real DART_API_KEY — see docs/project-plan.md M2). If that file is entirely
+missing (e.g. a teammate/CI without a DART_API_KEY, or Docker where data/ isn't copied into the
+image), falls back to canned mock sources so the API stays usable; if the file loaded fine but
+this specific ticker just has no matching disclosures, returns an honest empty list instead of
+inventing evidence.
 """
 
 import io
@@ -12,8 +14,10 @@ import re
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
+from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -22,6 +26,11 @@ from app.schemas.explanation import Source
 
 DOCUMENT_URL = "https://opendart.fss.or.kr/api/document.xml"
 EXCERPT_LENGTH = 400
+MAX_SOURCES = 5
+DISCLOSURE_SLOTS = 3  # MAX_SOURCES 중 공시에 우선 배정하는 자리 수 — 나머지는 뉴스, 한쪽이 모자라면 상대가 채움
+
+_MOCK_PUBLISHERS = ["샘플 경제신문", "샘플 증권리서치", "샘플 뉴스와이어"]
+
 
 def _find_data_file(filename: str) -> Path | None:
     """Locate a file under data/ relative to this file.
@@ -37,8 +46,6 @@ def _find_data_file(filename: str) -> Path | None:
             return candidate
     return None
 
-
-MAX_SOURCES = 5
 
 # Routine/administrative DART filing types that are frequent but rarely explain a price move
 # (e.g. an individual executive reporting a small personal stock trade). Deprioritized, not
@@ -72,7 +79,10 @@ def _load_disclosures_by_ticker() -> dict[str, list[dict]]:
     by_ticker: dict[str, list[dict]] = {}
     for entries in raw.values():
         for entry in entries:
-            by_ticker.setdefault(entry["stock_code"], []).append(entry)
+            ticker = entry.get("stock_code")
+            if not ticker:
+                continue
+            by_ticker.setdefault(ticker, []).append(entry)
     return by_ticker
 
 
@@ -212,17 +222,114 @@ def _to_source(entry: dict) -> Source:
     )
 
 
+@lru_cache(maxsize=1)
+def _load_news_by_ticker() -> dict[str, list[dict]]:
+    path = _find_data_file("news.json")
+    if path is None:
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _news_pub_date(article: dict) -> date | None:
+    try:
+        return parsedate_to_datetime(article["pub_date"]).date()
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def _news_to_source(article: dict, index: int) -> Source:
+    pub_date = _news_pub_date(article)
+    published_at = f"{pub_date.isoformat()}T00:00:00+09:00" if pub_date else ""
+    domain = urlparse(article["link"]).netloc.removeprefix("www.")
+
+    return Source(
+        id=f"news-{index}",
+        type="news",
+        title=article["title"],
+        publisher=domain or "네이버 뉴스",
+        published_at=published_at,
+        url=article["link"],
+        excerpt=article["description"],
+    )
+
+
+def _mock_documents(ticker: str, selected_date: str, direction: str) -> list[Source]:
+    tone = "긍정적인" if direction == "up" else "부정적인" if direction == "down" else "중립적인"
+
+    return [
+        Source(
+            id="source-1",
+            type="news",
+            title=f"{ticker} 관련 {tone} 시장 반응 기사",
+            publisher=_MOCK_PUBLISHERS[0],
+            published_at=f"{selected_date}T09:20:00+09:00",
+            url="https://example.com/news/1",
+            excerpt=f"{selected_date} 전후로 {tone} 수급 변화가 관찰되었다는 내용입니다.",
+        ),
+        Source(
+            id="source-2",
+            type="report",
+            title=f"{ticker} 업종 전망 리포트",
+            publisher=_MOCK_PUBLISHERS[1],
+            published_at=f"{selected_date}T08:00:00+09:00",
+            url="https://example.com/report/1",
+            excerpt="업황 및 실적 전망에 대한 애널리스트 의견을 요약한 리포트 발췌입니다.",
+        ),
+        Source(
+            id="source-3",
+            type="disclosure",
+            title=f"{ticker} 공시 요약",
+            publisher=_MOCK_PUBLISHERS[2],
+            published_at=f"{selected_date}T16:00:00+09:00",
+            url="https://example.com/disclosure/1",
+            excerpt="공개된 공시 자료 중 가격 변동과 관련될 수 있는 항목 발췌입니다.",
+        ),
+    ]
+
+
+def _source_date_distance(source: Source, target: date) -> int:
+    if not source.published_at:
+        return 10_000
+    return abs((date.fromisoformat(source.published_at[:10]) - target).days)
+
+
 def get_related_documents(ticker: str, selected_date: str, direction: str) -> list[Source]:
-    entries = _load_disclosures_by_ticker().get(ticker, [])
-    if not entries:
+    disclosures_by_ticker = _load_disclosures_by_ticker()
+    news_by_ticker = _load_news_by_ticker()
+
+    if not disclosures_by_ticker and not news_by_ticker:
+        return _mock_documents(ticker, selected_date, direction)
+
+    disclosure_entries = disclosures_by_ticker.get(ticker, [])
+    news_entries = news_by_ticker.get(ticker, [])
+    if not disclosure_entries and not news_entries:
         return []
 
     target = date.fromisoformat(selected_date)
 
-    def rank_key(entry: dict) -> tuple[bool, int]:
+    def disclosure_rank_key(entry: dict) -> tuple[bool, int, int]:
         entry_date = datetime.strptime(entry["rcept_dt"], "%Y%m%d").date()
-        distance = abs((entry_date - target).days)
-        return (_is_routine(entry["report_nm"]), distance)
+        delta = (entry_date - target).days
+        return (_is_routine(entry["report_nm"]), 0 if delta <= 0 else 1, abs(delta))
 
-    ranked = sorted(entries, key=rank_key)[:MAX_SOURCES]
-    return [_to_source(entry) for entry in ranked]
+    def news_rank_key(article: dict) -> tuple[int, int]:
+        pub_date = _news_pub_date(article)
+        if pub_date is None:
+            return (1, 10_000)
+        delta = (pub_date - target).days
+        return (0 if delta <= 0 else 1, abs(delta))
+
+    ranked_disclosures = sorted(disclosure_entries, key=disclosure_rank_key)
+    ranked_news = sorted(news_entries, key=news_rank_key)
+
+    # 공시 DISCLOSURE_SLOTS개 + 뉴스 나머지를 기본 배정으로 하되, 한쪽이 모자라면 그만큼 상대에게 넘김.
+    disclosure_slots = min(DISCLOSURE_SLOTS, len(ranked_disclosures))
+    news_slots = min(MAX_SOURCES - disclosure_slots, len(ranked_news))
+    disclosure_slots = min(MAX_SOURCES - news_slots, len(ranked_disclosures))
+
+    sources = [_to_source(entry) for entry in ranked_disclosures[:disclosure_slots]]
+    sources += [_news_to_source(article, index) for index, article in enumerate(ranked_news[:news_slots])]
+
+    # 공시·뉴스를 합친 뒤 선택 날짜와 가까운 순으로 다시 정렬 — 가장 관련 있는 근거가 앞에 오게.
+    sources.sort(key=lambda source: _source_date_distance(source, target))
+    return sources

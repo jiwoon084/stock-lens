@@ -847,3 +847,120 @@ body {
     position: static;
   }
 }
+
+/* 오늘의 체크리스트 (article-checklist) */
+.article-checklist__summary {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 var(--spacing-md) 0;
+}
+
+.article-checklist__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.checklist-item {
+  display: flex;
+  gap: var(--spacing-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+}
+
+.checklist-item--checked {
+  background: var(--color-surface-muted);
+}
+
+.checklist-item--checked .checklist-item__headline {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.checklist-item__checkbox {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.checklist-item__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.checklist-item__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.checklist-item__headline {
+  font-weight: 600;
+  word-break: keep-all;
+}
+
+.checklist-item__description {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin: 4px 0 0 0;
+  word-break: keep-all;
+}
+
+.checklist-item__link {
+  color: var(--color-accent);
+  margin-left: var(--spacing-sm);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.checklist-item__link:hover {
+  text-decoration: underline;
+}
+
+.checklist-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.checklist-tag--positive {
+  background: var(--tag-positive-bg);
+  color: var(--tag-positive-text);
+}
+
+.checklist-tag--negative {
+  background: var(--tag-negative-bg);
+  color: var(--tag-negative-text);
+}
+
+.checklist-tag--earnings {
+  background: var(--tag-earnings-bg);
+  color: var(--tag-earnings-text);
+}
+
+.checklist-tag--caution {
+  background: var(--tag-caution-bg);
+  color: var(--tag-caution-text);
+}
+
+.checklist-tag--neutral {
+  background: var(--tag-neutral-bg);
+  color: var(--tag-neutral-text);
+}
+
+.article-checklist__footer {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  margin: var(--spacing-md) 0 0 0;
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--color-border);
+}

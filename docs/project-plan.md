@@ -70,11 +70,12 @@ feed the analysis, the agreed tiering was:
      and `krx_price_client.py`'s field mapping (`basDt`/`mkp`/`hipr`/`lopr`/`clpr`/`fltRt`/`trqu`/
      `mrktCtg`) parses real responses correctly end to end through
      `GET /api/v1/stocks/{ticker}/prices`.
-3. **M2 — Real retrieval — mostly done, DART only**: `retrieval_service.py` no longer returns
+3. **M2 — Real retrieval — done, DART + Naver News**: `retrieval_service.py` no longer returns
    hardcoded sources.
-   - `data/step1_corpcode.py` → `step2_disclosures.py` fetch real DART corp codes and ~3 months
-     of disclosures per sample ticker into `data/disclosures.json` (one-time snapshot, no
-     scheduled refresh — MVP decision).
+   - `data/step1_corpcode.py` → `step2_disclosures.py` fetch real DART corp codes and ~1 year of
+     disclosures per sample ticker into `data/disclosures.json` (one-time snapshot, chunked by
+     90-day windows with pagination since Open DART limits both, no scheduled refresh — MVP
+     decision).
    - `retrieval_service.py` ranks disclosures by date-proximity to the selected date, with
      routine/administrative filing types (e.g. individual executives reporting personal trades)
      deprioritized — not discarded.
@@ -85,18 +86,44 @@ feed the analysis, the agreed tiering was:
      (`tsstkDpDecsn` 자기주식처분결정, `piicDecsn` 유상증자결정) for the two event types that
      appeared in the real sample data; those give clean labeled fields (처분목적/처분가액,
      증자방식/신주수 등) and take priority over the raw-text excerpt when available.
+   - **뉴스 연동 완료**: `data/step5_news.py`가 네이버 뉴스 검색 API로 종목별 실제 기사를
+     `data/news.json`에 저장 (`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` 필요, 없으면 스크립트만
+     못 돌리는 것이고 서비스 자체는 안 죽음). `retrieval_service.get_related_documents()`가
+     공시(최대 `DISCLOSURE_SLOTS`=3자리 우선)와 뉴스를 합쳐서 최대 5건을 반환 — 한쪽이 모자라면
+     다른 쪽이 채움. `article-checklist` 기능("오늘의 체크리스트")은 같은 뉴스 데이터를
+     `checklist_service.py`로 별도 가공해서 보여줌.
    - **Not done**: 자기주식취득결정 has zero real occurrences in the current 5-ticker sample so
      its formatter is unverified; other DART event-specific APIs (배당결정, 회사분할, 소송 등)
-     aren't wired at all. 뉴스 and 증권사 리서치 리포트 (한경 컨센서스 등) — tier 2 in the
-     priority model above — are entirely unconnected; source selection (crawling vs. a news API)
-     hasn't been decided.
-4. **M3 — Real LLM — not started**: `llm_service.py` now receives real DART text/structured
-   data, but the summarization and 호재/유의/중립 labeling are still rule-based (impact is
-   inferred purely from the day's price direction, not from reading the content — this is a
-   known, documented limitation, visible in the UI's own limitations list). Wiring SOLAR (via
-   `langchain-upstage`) or Gemini using `app/prompts/explain_movement.txt`, gated by
-   `LLM_PROVIDER`, is still ahead. `backend/app/agent/` holds an early LangGraph skeleton
-   (`state.py`/`nodes.py`/`graph.py`, still TODO stubs) for this.
+     aren't wired at all. 증권사 리서치 리포트(한경 컨센서스 등)는 여전히 미연동.
+4. **M3 — Real LLM — done, SOLAR + Gemini (user-selectable)**: `llm_service.py` dispatches on a
+   per-request `llm_provider` field (`"solar"` | `"gemini"`, default `"solar"`) — see
+   `app/services/solar_client.py` / `gemini_client.py`. Both call their provider's native REST
+   API directly with `requests` (no SDK) and enforce a JSON-schema-constrained response, so the
+   model's output always parses into `Factor`/`limitations` cleanly. **A parallel branch briefly
+   existed with an automatic SOLAR→Gemini→Groq fallback chain built on the `openai` SDK
+   (`e258fd0`/`2de919d`) — deliberately not kept** (2026-07-21 decision): the product calls for
+   the user to explicitly pick a model (see `frontend/.../LlmProviderToggle.tsx`), not an
+   invisible 3-way fallback, and Groq was never part of the ask. If a per-request pick is ever
+   not enough (e.g. need automatic retry across providers), that branch's `_call_provider`/
+   `_providers()` pattern in `llm_service.py` history is a reasonable starting point to revive.
+   - Falls back to a deterministic, source-grounded rule-based response (each factor built from
+     an actual retrieved document's title/excerpt, not templated text) if the chosen provider's
+     key is missing, or the call fails for any reason — verified by unit tests
+     (`test_solar_client.py`, `test_gemini_client.py`, `test_llm_service.py`) that never hit the
+     network, plus real end-to-end calls against both providers (see below).
+   - **Verified 2026-07-21 against real keys, both providers**: SOLAR via `solar-pro2`
+     (`https://api.upstage.ai/v1/chat/completions`, OpenAI-compatible). Gemini required two
+     rounds of empirical fixing — a freshly created API key 404'd on the dated model name
+     `gemini-2.5-flash` ("no longer available to new users"), and separately a different key hit
+     429 "prepayment credits are depleted" on `gemini-3.5-flash` (that model is paid-only, not on
+     the free tier). `gemini-flash-latest` (a Google-maintained alias that always points at their
+     current free-tier Flash model) resolved both — see `gemini_client.py` docstring.
+   - Anti-hallucination: `app/prompts/explain_movement.txt` tags every retrieved document with
+     its real `[id]` and instructs the model to only cite ids it was actually shown; `llm_service.
+     _sanitize_factors()` additionally strips any cited id that doesn't match a real source as a
+     backstop, in case a model ignores the instruction.
+   - `backend/app/agent/` still holds an early, untouched LangGraph skeleton
+     (`state.py`/`nodes.py`/`graph.py`, TODO stubs) — not used by the above.
 5. **M4 — GCP deployment — not started**: complete the one-time setup in `infra/gcp-setup.md`,
    then let `.github/workflows/deploy.yml` run for real. Now also needs `DART_API_KEY` in Secret
    Manager (same pattern as SOLAR/GEMINI) and confirmation that the Cloud Run backend has
