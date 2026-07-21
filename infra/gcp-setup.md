@@ -35,10 +35,13 @@ stored — GitHub Actions authenticates via OIDC (`google-github-actions/auth@v2
 ```bash
 printf '%s' "$SOLAR_API_KEY" | gcloud secrets create SOLAR_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 printf '%s' "$GEMINI_API_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
+printf '%s' "$DART_API_KEY" | gcloud secrets create DART_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 ```
 
 Grant the backend Cloud Run runtime service account `roles/secretmanager.secretAccessor` on
-both secrets.
+all three secrets. `DART_API_KEY` is the one actually in use today (SOLAR/GEMINI are still
+unused placeholders) — see `docs/deployment.md` for a packaging gap around it (the DART
+disclosure snapshot isn't in the deploy image yet).
 
 ## 5. Configure GitHub Repository Variables
 

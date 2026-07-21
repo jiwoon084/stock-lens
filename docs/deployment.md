@@ -46,15 +46,31 @@ gcloud iam service-accounts create stock-lens-api-runtime --project "$GCP_PROJEC
 
 printf '%s' "$SOLAR_API_KEY" | gcloud secrets create SOLAR_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 printf '%s' "$GEMINI_API_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
+printf '%s' "$DART_API_KEY" | gcloud secrets create DART_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 
 gcloud secrets add-iam-policy-binding SOLAR_API_KEY \
   --member="serviceAccount:stock-lens-api-runtime@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor" --project "$GCP_PROJECT_ID"
-# repeat for GEMINI_API_KEY
+# repeat for GEMINI_API_KEY and DART_API_KEY
 ```
 
-Real keys are never committed — only `SOLAR_API_KEY=` / `GEMINI_API_KEY=` placeholders exist
-in `.env.example`, and `deploy.yml` injects them via `--set-secrets`, not plain env vars.
+Real keys are never committed — only `SOLAR_API_KEY=` / `GEMINI_API_KEY=` / `DART_API_KEY=`
+placeholders exist in `.env.example`, and `deploy.yml` injects them via `--set-secrets`, not
+plain env vars.
+
+**`DART_API_KEY` is the one actually used today** (`app/services/retrieval_service.py`) — without
+it, `/api/v1/explanations` still works but always returns the "no related disclosures found"
+response. `SOLAR_API_KEY`/`GEMINI_API_KEY` remain unused placeholders until M3 (see
+`docs/project-plan.md`).
+
+**Known gap**: `backend/Dockerfile` only copies `app/` into the image — `data/disclosures.json`
+(the DART snapshot) is not baked in, and there's no volume mount in production the way
+`compose.yaml` mounts `./data` locally. Until that's addressed, a Cloud Run deploy of the
+current backend will have `DART_API_KEY` working for live per-request calls (document body,
+structured events) but no disclosure *list* to rank against, so it'll behave like the "no
+related disclosures found" case for every request. Decide how the snapshot ships (bake into the
+image at build time, a mounted volume/GCS bucket, or move list-fetching to be live too) before
+relying on this in a real deployment.
 
 ## 6. GitHub Repository Variables
 
