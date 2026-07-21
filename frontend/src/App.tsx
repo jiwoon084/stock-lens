@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { ChartToolbar, filterPricesByPeriod, type ChartPeriod } from "./features/price-chart/ChartToolbar";
+import { ChartTypeToggle, type ChartType } from "./features/price-chart/ChartTypeToggle";
 import { PriceChart } from "./features/price-chart/PriceChart";
 import { SelectedPointInfo } from "./features/price-chart/SelectedPointInfo";
 import { StockHeader } from "./features/price-chart/StockHeader";
@@ -17,6 +18,7 @@ import type { PricePoint } from "./shared/types/stock";
 export default function App() {
   const [ticker, setTicker] = useState("005930");
   const [period, setPeriod] = useState<ChartPeriod>("all");
+  const [chartType, setChartType] = useState<ChartType>("candle");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
 
   const stocks = useStocks();
@@ -59,7 +61,12 @@ export default function App() {
         <div className="workspace__main">
           <Card
             className="chart-card"
-            title="주가 차트"
+            title={
+              <span className="chart-card__title-row">
+                주가 차트
+                <ChartTypeToggle chartType={chartType} onChange={setChartType} />
+              </span>
+            }
             actions={<ChartToolbar period={period} onChangePeriod={setPeriod} />}
           >
             {pricesError && <div className="error-banner">{pricesError}</div>}
@@ -70,6 +77,7 @@ export default function App() {
                 <PriceChart
                   prices={visiblePrices}
                   selectedTime={selectedPoint?.time ?? null}
+                  chartType={chartType}
                   onSelectPoint={handleSelectPoint}
                 />
                 <SelectedPointInfo point={selectedPoint} />

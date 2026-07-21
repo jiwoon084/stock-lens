@@ -1,7 +1,7 @@
 import type { PropsWithChildren, ReactNode } from "react";
 
 interface CardProps extends PropsWithChildren {
-  title?: string;
+  title?: ReactNode;
   actions?: ReactNode;
   className?: string;
 }
