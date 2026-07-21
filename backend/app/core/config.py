@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     solar_api_key: str = ""
     gemini_api_key: str = ""
     dart_api_key: str = ""
+    krx_api_key: str = ""
 
     @property
     def allowed_origins_list(self) -> list[str]:

@@ -47,21 +47,25 @@ gcloud iam service-accounts create stock-lens-api-runtime --project "$GCP_PROJEC
 printf '%s' "$SOLAR_API_KEY" | gcloud secrets create SOLAR_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 printf '%s' "$GEMINI_API_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 printf '%s' "$DART_API_KEY" | gcloud secrets create DART_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
+printf '%s' "$KRX_API_KEY" | gcloud secrets create KRX_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
 
 gcloud secrets add-iam-policy-binding SOLAR_API_KEY \
   --member="serviceAccount:stock-lens-api-runtime@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor" --project "$GCP_PROJECT_ID"
-# repeat for GEMINI_API_KEY and DART_API_KEY
+# repeat for GEMINI_API_KEY, DART_API_KEY, and KRX_API_KEY
 ```
 
-Real keys are never committed — only `SOLAR_API_KEY=` / `GEMINI_API_KEY=` / `DART_API_KEY=`
-placeholders exist in `.env.example`, and `deploy.yml` injects them via `--set-secrets`, not
-plain env vars.
+Real keys are never committed — only `SOLAR_API_KEY=` / `GEMINI_API_KEY=` / `DART_API_KEY=` /
+`KRX_API_KEY=` placeholders exist in `.env.example`, and `deploy.yml` injects them via
+`--set-secrets`, not plain env vars.
 
-**`DART_API_KEY` is the one actually used today** (`app/services/retrieval_service.py`) — without
-it, `/api/v1/explanations` still works but always returns the "no related disclosures found"
-response. `SOLAR_API_KEY`/`GEMINI_API_KEY` remain unused placeholders until M3 (see
-`docs/project-plan.md`).
+**`DART_API_KEY` and `KRX_API_KEY` are the ones actually used today**
+(`app/services/retrieval_service.py` and `app/services/krx_price_client.py`). Without
+`DART_API_KEY`, `/api/v1/explanations` still works but always returns the "no related
+disclosures found" response. Without `KRX_API_KEY` (or if the data.go.kr call fails for any
+reason), `/api/v1/stocks/{ticker}/prices` falls back to mock prices instead of erroring —
+see `app/services/market_data_service.py`. `SOLAR_API_KEY`/`GEMINI_API_KEY` remain unused
+placeholders until M3 (see `docs/project-plan.md`).
 
 **Known gap**: `backend/Dockerfile` only copies `app/` into the image — `data/disclosures.json`
 (the DART snapshot) is not baked in, and there's no volume mount in production the way

@@ -125,6 +125,10 @@ cp .env.example .env
   `data/step1_corpcode.py` → `step2_disclosures.py` → `step3_major_events.py` 실행과, 백엔드의
   실시간 공시 본문/구조화 이벤트 조회(`retrieval_service.py`)에 쓰입니다. 키가 없으면 앱이 죽지
   않고 그냥 "관련 DART 공시 자료를 찾지 못했습니다"로 정직하게 응답합니다.
+- `KRX_API_KEY` — **실제로 사용됨**. [data.go.kr](https://www.data.go.kr)에서 "금융위원회_주식시세정보"
+  API를 활용신청하면 받는 "일반 인증키(Decoding)"를 넣으세요. `market_data_service.py`가 요청마다
+  실시간으로 KRX 일별 시세를 가져오는 데 씁니다 (같은 날 반복 요청은 캐시). 키가 없거나 호출이
+  실패해도 앱이 죽지 않고 기존 mock 시세로 폴백합니다.
 - `GCP_*`, `FRONTEND_SERVICE_NAME`, `BACKEND_SERVICE_NAME` — GCP 배포용 (아래 참고)
 
 ## DART 실데이터 준비 (선택)
@@ -164,6 +168,9 @@ Artifact Registry, Workload Identity Federation, Secret Manager, GitHub Reposito
 - **DART 공시 실데이터**: 5개 종목 실제 공시 목록(`data/disclosures.json`) + 실시간 본문 발췌
   (`document.xml`, XML/HTML 두 형식 모두 처리) + 구조화 이벤트(자기주식처분결정/유상증자결정)
   까지 연동. 행정성 보고서(임원 소유상황 등)는 후순위 우선순위 규칙으로 처리
+- **KRX 실 시세 데이터**: data.go.kr "금융위원회_주식시세정보"로 요청마다 실시간 조회
+  (`app/services/krx_price_client.py`, 2026-07-21 실 키로 필드 매핑 검증 완료). 키가 없거나
+  호출이 실패하면 mock 시세로 자동 폴백 — 자세한 내용은 [docs/project-plan.md](docs/project-plan.md) M1 참고
 - 프론트엔드-백엔드 API 계약 (snake_case로 통일, 변환 로직 없음) — 스키마는 초기와 동일, 내용만 실데이터로 교체됨
 - 로컬 실행 (venv/npm, Docker Compose, `data/` 볼륨 마운트로 실데이터도 로컬 Docker에서 동작)
 - Docker 빌드 (frontend/backend 모두 로컬에서 build 및 실행 검증 완료)
@@ -172,8 +179,6 @@ Artifact Registry, Workload Identity Federation, Secret Manager, GitHub Reposito
 
 ## 향후 구현 예정 항목
 
-- 실제 시세 데이터 연동 (`market_data_service.py` 교체 — `pykrx`를 시도했으나 최근 KRX 로그인
-  정책 변경으로 비로그인 요청이 신뢰할 수 없는 값을 반환함을 확인, 보류 중. 대안 소스 검토 필요)
 - 나머지 DART 이벤트 유형 구조화 (자기주식취득결정 등 — 지금 5개 종목 데이터엔 해당 사례가 없어 미검증)
 - 뉴스 연동 (네이버 금융 등 — 크롤링 vs 뉴스 API 소스 결정 필요)
 - 한경 컨센서스 등 증권사 리서치 리포트 연동

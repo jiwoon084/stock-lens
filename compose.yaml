@@ -12,6 +12,7 @@ services:
       - SOLAR_API_KEY=${SOLAR_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - DART_API_KEY=${DART_API_KEY:-}
+      - KRX_API_KEY=${KRX_API_KEY:-}
     volumes:
       - ./data:/app/data:ro
     healthcheck:

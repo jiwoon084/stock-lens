@@ -43,15 +43,33 @@ feed the analysis, the agreed tiering was:
 
 1. **M0 — Monorepo boilerplate — done**: structure, mock APIs, working local/Docker run, CI/CD
    skeleton.
-2. **M1 — Real market data — blocked/deferred**: tried `pykrx` for real KRX price series;
-   confirmed (via direct calls) that KRX changed its access policy around 2026-04
-   (`feat: add KRX login/session support` in pykrx's own history) and unauthenticated requests
-   now return unreliable data or errors. `KRX_ID`/`KRX_PW` are personal KRX account credentials,
-   not an API key — scripting logins with them is a real account-safety/ToS concern, so this
-   was deliberately not pursued further. Price data stays Mock. Revisit only with either a
-   sanctioned KRX account for this purpose or a different real price-data source — real-time
-   price isn't actually required for the product goal (explaining moves from disclosures), so
-   this is low priority.
+2. **M1 — Real market data — done, via data.go.kr**: `pykrx` was tried first and
+   deferred (see below); resumed instead with **금융위원회_주식시세정보**
+   (`GetStockSecuritiesInfoService/getStockPriceInfo` on data.go.kr) — a proper service-key API,
+   not a personal-account login, so the ToS/account-safety concern that blocked `pykrx` doesn't
+   apply here.
+   - `app/services/krx_price_client.py` calls the API live per request (`beginBasDt`/`endBasDt`
+     date-range query by `likeSrtnCd`), with an in-process `lru_cache` keyed by
+     (ticker, today's date) so repeated requests on the same day don't re-hit the API. Unlike
+     DART's disclosures (historical facts, fetched once into `data/disclosures.json` — see M2),
+     daily prices change every trading day, so a one-time snapshot would just be another frozen
+     mock; this is deliberately *not* a `data/step*.py` snapshot script.
+   - `market_data_service.get_price_series()` tries the real client only when `KRX_API_KEY` is
+     set, and falls back to the existing deterministic mock generator
+     (`_generate_mock_price_series`) on any failure (missing key, network error, unexpected
+     response shape, non-`"00"` `resultCode`) — this is an intentional difference from DART's
+     "honest empty result" pattern: an empty price series breaks the chart entirely, whereas
+     mock prices keep the product usable while still being obviously a placeholder.
+   - Old `pykrx` finding, still true and why it wasn't reused: KRX changed its access policy
+     around 2026-04 (`feat: add KRX login/session support` in pykrx's own history) and
+     unauthenticated requests now return unreliable data or errors; `KRX_ID`/`KRX_PW` are
+     personal KRX account credentials, not an API key, so scripting logins with them was
+     deliberately not pursued.
+   - **Verified 2026-07-21** against a real `KRX_API_KEY`: `srtnCd`/`itmsNm` in the response
+     match the requested ticker exactly (e.g. `005930`/`삼성전자`, no `likeSrtnCd` over-matching),
+     and `krx_price_client.py`'s field mapping (`basDt`/`mkp`/`hipr`/`lopr`/`clpr`/`fltRt`/`trqu`/
+     `mrktCtg`) parses real responses correctly end to end through
+     `GET /api/v1/stocks/{ticker}/prices`.
 3. **M2 — Real retrieval — mostly done, DART only**: `retrieval_service.py` no longer returns
    hardcoded sources.
    - `data/step1_corpcode.py` → `step2_disclosures.py` fetch real DART corp codes and ~3 months

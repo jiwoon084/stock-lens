@@ -1,7 +1,12 @@
+import logging
 import random
 from datetime import date, timedelta
 
+from app.core.config import settings
 from app.schemas.stock import PricePoint, Stock
+from app.services import krx_price_client
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_STOCKS: list[Stock] = [
     Stock(ticker="005930", name="삼성전자", market="KOSPI"),
@@ -45,6 +50,19 @@ def get_stock(ticker: str) -> Stock | None:
 
 
 def get_price_series(ticker: str) -> list[PricePoint]:
+    """Real KRX daily prices when KRX_API_KEY is configured, otherwise (or on any failure of
+    that real call) a deterministic mock series — see docs/project-plan.md M1.
+    """
+    if settings.krx_api_key:
+        try:
+            return krx_price_client.fetch_price_series(ticker)
+        except krx_price_client.KrxApiError as exc:
+            logger.warning("KRX price fetch failed for %s, falling back to mock: %s", ticker, exc)
+
+    return _generate_mock_price_series(ticker)
+
+
+def _generate_mock_price_series(ticker: str) -> list[PricePoint]:
     rng = random.Random(f"stock-lens-{ticker}")
     trading_days = _business_days_ending(_LATEST_TRADING_DAY, _TRADING_DAYS)
 
