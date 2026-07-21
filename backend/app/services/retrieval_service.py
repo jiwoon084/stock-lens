@@ -14,8 +14,10 @@ import re
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
+from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -25,6 +27,7 @@ from app.schemas.explanation import Source
 DOCUMENT_URL = "https://opendart.fss.or.kr/api/document.xml"
 EXCERPT_LENGTH = 400
 MAX_SOURCES = 5
+DISCLOSURE_SLOTS = 3  # MAX_SOURCES 중 공시에 우선 배정하는 자리 수 — 나머지는 뉴스, 한쪽이 모자라면 상대가 채움
 
 _MOCK_PUBLISHERS = ["샘플 경제신문", "샘플 증권리서치", "샘플 뉴스와이어"]
 
@@ -219,6 +222,37 @@ def _to_source(entry: dict) -> Source:
     )
 
 
+@lru_cache(maxsize=1)
+def _load_news_by_ticker() -> dict[str, list[dict]]:
+    path = _find_data_file("news.json")
+    if path is None:
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _news_pub_date(article: dict) -> date | None:
+    try:
+        return parsedate_to_datetime(article["pub_date"]).date()
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def _news_to_source(article: dict, index: int) -> Source:
+    pub_date = _news_pub_date(article)
+    published_at = f"{pub_date.isoformat()}T00:00:00+09:00" if pub_date else ""
+    domain = urlparse(article["link"]).netloc.removeprefix("www.")
+
+    return Source(
+        id=f"news-{index}",
+        type="news",
+        title=article["title"],
+        publisher=domain or "네이버 뉴스",
+        published_at=published_at,
+        url=article["link"],
+        excerpt=article["description"],
+    )
+
+
 def _mock_documents(ticker: str, selected_date: str, direction: str) -> list[Source]:
     tone = "긍정적인" if direction == "up" else "부정적인" if direction == "down" else "중립적인"
 
@@ -253,21 +287,49 @@ def _mock_documents(ticker: str, selected_date: str, direction: str) -> list[Sou
     ]
 
 
+def _source_date_distance(source: Source, target: date) -> int:
+    if not source.published_at:
+        return 10_000
+    return abs((date.fromisoformat(source.published_at[:10]) - target).days)
+
+
 def get_related_documents(ticker: str, selected_date: str, direction: str) -> list[Source]:
-    by_ticker = _load_disclosures_by_ticker()
-    if not by_ticker:
+    disclosures_by_ticker = _load_disclosures_by_ticker()
+    news_by_ticker = _load_news_by_ticker()
+
+    if not disclosures_by_ticker and not news_by_ticker:
         return _mock_documents(ticker, selected_date, direction)
 
-    entries = by_ticker.get(ticker, [])
-    if not entries:
+    disclosure_entries = disclosures_by_ticker.get(ticker, [])
+    news_entries = news_by_ticker.get(ticker, [])
+    if not disclosure_entries and not news_entries:
         return []
 
     target = date.fromisoformat(selected_date)
 
-    def rank_key(entry: dict) -> tuple[bool, int, int]:
+    def disclosure_rank_key(entry: dict) -> tuple[bool, int, int]:
         entry_date = datetime.strptime(entry["rcept_dt"], "%Y%m%d").date()
         delta = (entry_date - target).days
         return (_is_routine(entry["report_nm"]), 0 if delta <= 0 else 1, abs(delta))
 
-    ranked = sorted(entries, key=rank_key)[:MAX_SOURCES]
-    return [_to_source(entry) for entry in ranked]
+    def news_rank_key(article: dict) -> tuple[int, int]:
+        pub_date = _news_pub_date(article)
+        if pub_date is None:
+            return (1, 10_000)
+        delta = (pub_date - target).days
+        return (0 if delta <= 0 else 1, abs(delta))
+
+    ranked_disclosures = sorted(disclosure_entries, key=disclosure_rank_key)
+    ranked_news = sorted(news_entries, key=news_rank_key)
+
+    # 공시 DISCLOSURE_SLOTS개 + 뉴스 나머지를 기본 배정으로 하되, 한쪽이 모자라면 그만큼 상대에게 넘김.
+    disclosure_slots = min(DISCLOSURE_SLOTS, len(ranked_disclosures))
+    news_slots = min(MAX_SOURCES - disclosure_slots, len(ranked_news))
+    disclosure_slots = min(MAX_SOURCES - news_slots, len(ranked_disclosures))
+
+    sources = [_to_source(entry) for entry in ranked_disclosures[:disclosure_slots]]
+    sources += [_news_to_source(article, index) for index, article in enumerate(ranked_news[:news_slots])]
+
+    # 공시·뉴스를 합친 뒤 선택 날짜와 가까운 순으로 다시 정렬 — 가장 관련 있는 근거가 앞에 오게.
+    sources.sort(key=lambda source: _source_date_distance(source, target))
+    return sources
