@@ -4,3 +4,6 @@ pydantic==2.9.2
 pydantic-settings==2.5.2
 pytest==8.3.3
 httpx==0.27.2
+# pykrx: only used by data/step4_prices.py (offline collector), not imported by the running API
+pykrx==1.2.8
+openai==1.54.4
