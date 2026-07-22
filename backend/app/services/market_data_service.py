@@ -3,8 +3,8 @@ import random
 from datetime import date, timedelta
 
 from app.core.config import settings
-from app.schemas.stock import PricePoint, Stock
-from app.services import krx_price_client
+from app.schemas.stock import LivePrice, PricePoint, Stock
+from app.services import kis_client, krx_price_client
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,22 @@ def get_price_series(ticker: str) -> list[PricePoint]:
             logger.warning("KRX price fetch failed for %s, falling back to mock: %s", ticker, exc)
 
     return _generate_mock_price_series(ticker)
+
+
+def get_live_price(ticker: str) -> LivePrice | None:
+    """Near-real-time current price during market hours, via KIS Developers (demo account).
+
+    Returns None (not a mock) when unavailable — a fabricated "live" price would violate the
+    project's "출처 기반 신뢰성" principle worse than just hiding the live badge.
+    """
+    if not settings.kis_app_key or not settings.kis_app_secret:
+        return None
+
+    try:
+        return kis_client.fetch_live_price(ticker)
+    except kis_client.KisApiError as exc:
+        logger.warning("KIS live price fetch failed for %s: %s", ticker, exc)
+        return None
 
 
 def _generate_mock_price_series(ticker: str) -> list[PricePoint]:

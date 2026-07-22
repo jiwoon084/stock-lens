@@ -124,10 +124,26 @@ body {
   text-align: right;
 }
 
+.stock-header__close-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .stock-header__close {
   font-size: 1.6rem;
   font-weight: 700;
   line-height: 1.2;
+}
+
+.stock-header__live-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--color-positive);
+  background: var(--color-positive-soft);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
 }
 
 .stock-header__change {
@@ -894,6 +910,10 @@ body {
 
   .stock-header__price {
     text-align: left;
+  }
+
+  .stock-header__close-row {
+    justify-content: flex-start;
   }
 
   .price-chart__container {

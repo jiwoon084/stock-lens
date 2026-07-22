@@ -329,6 +329,38 @@ git 히스토리(커밋 `7760d32`~`0a71d36`)에서 다시 꺼내와 적용함.
 - market_data_context의 `benchmark_name`/`market_comparison_text`(시장 대비 비교) — KOSPI
   지수 시리즈 데이터가 이 저장소에 없어서 항상 `None`. 인터페이스는 준비돼 있음.
 
+## 11. 실시간 시세 Phase 1 — KIS Developers 연동 (2026-07-22)
+
+기존 시세(`krx_price_client.py`, data.go.kr 공식 API)는 **일봉 전용**이라 장중에는 아무리 자주
+호출해도 항상 어제 종가까지만 나오는 구조적 한계가 있음 — "실시간 호출"이라는 기존 표현은
+"매 요청마다 API를 라이브로 부른다"는 뜻이지 데이터가 실시간이라는 뜻이 아니었음. 사용자가
+차트 데이터를 진짜 장중 실시간으로 바꾸고 싶다고 해서, 진짜 실시간엔 증권사 Open API가
+필요하다고 설명하고 **한국투자증권 KIS Developers(모의투자 계좌)** 로 진행하기로 확정.
+
+- **계정/키**: 모의투자 계좌 `50198821`(상시대회 국내주식), 모의투자용 APP KEY/SECRET 발급받아
+  `.env`에 `KIS_ACCOUNT_NO`/`KIS_APP_KEY`/`KIS_APP_SECRET`로 저장(gitignore됨,
+  `.env.example`엔 플레이스홀더만).
+- **범위를 의도적으로 좁힘 (Phase 1)**: 진짜 WebSocket 틱 스트리밍은 FastAPI 요청-응답 구조와
+  안 맞고 작업량이 커서, 이번엔 REST **현재가 조회 폴링**만 구현. 프론트가 10초 간격으로
+  폴링(`useLivePrice.ts`) → 오늘 하루치 가격만 실시간에 가깝게 갱신, 어제까지의 일봉은 기존
+  KRX 데이터 그대로. WebSocket 스트리밍은 나중에 필요하면 Phase 2로 남겨둠.
+- **백엔드**: `backend/app/services/kis_client.py`(모의투자 도메인
+  `openapivts.koreainvestment.com:29443`, OAuth 토큰 발급 후 현재가 조회) →
+  `market_data_service.get_live_price()`(KIS 키 없거나 실패 시 `None` 반환 — 실시간은 조작된
+  값을 보여주는 것보다 배지를 그냥 안 띄우는 게 "출처 기반 신뢰성" 원칙에 맞음, 기존 mock
+  폴백 패턴과 다름) → `GET /api/v1/stocks/{ticker}/live-price`.
+  ⚠️ **KIS 토큰 발급은 분당 1회로 제한**됨(초과 시 `EGW00133` 에러, 실제로 재현해서 확인함) —
+  그래서 발급받은 토큰(유효기간 24시간)을 모듈 전역에 캐싱하고 매 요청마다 재발급하지 않음
+  (`krx_price_client.py`의 당일 캐시와 같은 설계 원칙).
+- **프론트엔드**: `useLivePrice.ts`(10초 폴링 훅) → `StockHeader.tsx`에 "실시간" 배지 + 현재가
+  갱신, 라이브 데이터 없으면 기존 "업데이트 기준 YYYY-MM-DD" 일봉 표시로 자동 폴백.
+- 백엔드 테스트 59개(`test_kis_client.py` 5개 추가) 전부 통과, 프론트 빌드 정상, 실제 삼성전자
+  현재가로 end-to-end 검증 완료(Playwright 스크린샷으로 배지 렌더링 확인).
+
+**아직 안 한 것**: WebSocket 실시간 체결가(Phase 2), 장중이 아닐 때 폴링을 쉬게 하는 로직(지금은
+컴포넌트 마운트 중이면 항상 폴링 — 장 마감 후엔 KIS가 마지막 체결가를 그대로 반환하는 것으로
+보여서 실질적 문제는 없지만, 불필요한 API 호출이긴 함).
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
