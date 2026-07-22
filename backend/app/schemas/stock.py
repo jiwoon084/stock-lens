@@ -26,6 +26,11 @@ class LivePriceResponse(BaseModel):
     live: LivePrice | None = None
 
 
+class IntradayPoint(BaseModel):
+    time: str  # ISO 8601 datetime (today only), e.g. "2026-07-22T15:30:00+09:00"
+    price: float
+
+
 class PricePoint(BaseModel):
     time: str
     open: float

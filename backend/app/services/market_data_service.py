@@ -3,7 +3,7 @@ import random
 from datetime import date, timedelta
 
 from app.core.config import settings
-from app.schemas.stock import LivePrice, PricePoint, Stock
+from app.schemas.stock import IntradayPoint, LivePrice, PricePoint, Stock
 from app.services import kis_client, krx_price_client
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,40 @@ def get_live_price(ticker: str) -> LivePrice | None:
     except kis_client.KisApiError as exc:
         logger.warning("KIS live price fetch failed for %s: %s", ticker, exc)
         return None
+
+
+# ticker -> {"date": "YYYY-MM-DD", "points": {iso_time: price}} — accumulates each poll's ~30-row
+# chunk into a growing full-day series (resets when the calendar date rolls over). A single KIS
+# call only returns the most recent ~30 minutes (no pagination implemented), so on a cold start
+# only that much history shows up; it fills in as polling continues through the session.
+_intraday_cache: dict[str, dict] = {}
+
+
+def get_intraday_prices(ticker: str) -> list[IntradayPoint]:
+    """Today's near-real-time minute-by-minute prices for the continuous "today" chart segment.
+
+    Returns an empty list (not a mock) when KIS isn't configured or the call fails — same
+    "no fabricated real-time data" principle as get_live_price().
+    """
+    if not settings.kis_app_key or not settings.kis_app_secret:
+        return []
+
+    try:
+        fresh_points = kis_client.fetch_intraday_minute_prices(ticker)
+    except kis_client.KisApiError as exc:
+        logger.warning("KIS intraday fetch failed for %s: %s", ticker, exc)
+        fresh_points = []
+
+    today = date.today().isoformat()
+    cache_entry = _intraday_cache.get(ticker)
+    if cache_entry is None or cache_entry["date"] != today:
+        cache_entry = {"date": today, "points": {}}
+        _intraday_cache[ticker] = cache_entry
+
+    for point in fresh_points:
+        cache_entry["points"][point.time] = point.price
+
+    return [IntradayPoint(time=time, price=price) for time, price in sorted(cache_entry["points"].items())]
 
 
 def _generate_mock_price_series(ticker: str) -> list[PricePoint]:

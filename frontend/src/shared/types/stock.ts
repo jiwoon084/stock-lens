@@ -33,3 +33,8 @@ export interface LivePriceResponse {
   as_of: string | null;
   live: LivePrice | null;
 }
+
+export interface IntradayPoint {
+  time: string;
+  price: number;
+}

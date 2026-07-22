@@ -5,6 +5,7 @@ import { ChartTypeToggle, type ChartType } from "./features/price-chart/ChartTyp
 import { PriceChart, type ChartCoordinate } from "./features/price-chart/PriceChart";
 import { SelectedPointInfo } from "./features/price-chart/SelectedPointInfo";
 import { StockHeader } from "./features/price-chart/StockHeader";
+import { useIntradayPrices } from "./features/price-chart/useIntradayPrices";
 import { usePriceChart } from "./features/price-chart/usePriceChart";
 import { useMovementExplanation } from "./features/movement-explanation/useMovementExplanation";
 import { MarketEventsPanel } from "./features/market-events/MarketEventsPanel";
@@ -45,6 +46,7 @@ export default function App() {
 
   const stocks = useStocks();
   const { prices, loading: pricesLoading, error: pricesError } = usePriceChart(ticker);
+  const intradayPrices = useIntradayPrices(ticker);
   const { status, data, error, explain, reset } = useMovementExplanation();
   const {
     status: analysisStatus,
@@ -61,6 +63,7 @@ export default function App() {
   }, [ticker, reset, resetAnalysis]);
 
   const visiblePrices = filterPricesByPeriod(prices, period);
+  const isIntradayView = period === "today";
 
   function handleSelectTicker(nextTicker: string) {
     setTicker(nextTicker);
@@ -121,6 +124,8 @@ export default function App() {
                 <div className="price-chart__wrapper" ref={chartWrapperRef}>
                   <PriceChart
                     prices={visiblePrices}
+                    intradayPrices={intradayPrices}
+                    isIntradayView={isIntradayView}
                     selectedTime={selectedPoint?.time ?? null}
                     chartType={chartType}
                     onSelectPoint={handleSelectPoint}

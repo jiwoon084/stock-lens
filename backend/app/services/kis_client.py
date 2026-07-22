@@ -18,12 +18,14 @@ from datetime import datetime, timedelta
 import requests
 
 from app.core.config import settings
-from app.schemas.stock import LivePrice
+from app.schemas.stock import IntradayPoint, LivePrice
 
 BASE_URL = "https://openapivts.koreainvestment.com:29443"  # 모의투자(demo) 도메인
 TOKEN_URL = f"{BASE_URL}/oauth2/tokenP"
 QUOTE_URL = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-price"
 QUOTE_TR_ID = "FHKST01010100"
+INTRADAY_URL = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
+INTRADAY_TR_ID = "FHKST03010200"
 
 # prdy_vrss_sign: 1=상한, 2=상승, 3=보합, 4=하한, 5=하락 (KIS 공식 코드값)
 _UP_SIGNS = {"1", "2"}
@@ -115,3 +117,58 @@ def fetch_live_price(ticker: str) -> LivePrice:
         )
     except (KeyError, ValueError, TypeError) as exc:
         raise KisApiError(f"Unexpected KIS quote response shape: {exc}") from exc
+
+
+def _row_to_iso(bsop_date: str, cntg_hour: str) -> str:
+    return (
+        f"{bsop_date[0:4]}-{bsop_date[4:6]}-{bsop_date[6:8]}T"
+        f"{cntg_hour[0:2]}:{cntg_hour[2:4]}:{cntg_hour[4:6]}+09:00"
+    )
+
+
+def fetch_intraday_minute_prices(ticker: str) -> list[IntradayPoint]:
+    """Today's 1-minute bars, most-recent ~30 minutes only (KIS returns one page per call, no
+    pagination here) — `market_data_service.get_intraday_prices()` accumulates these across
+    repeated polls into a growing full-day series instead of re-fetching history every time.
+    """
+    token = _get_access_token()
+    now_hour = datetime.now().strftime("%H%M%S")
+
+    try:
+        response = requests.get(
+            INTRADAY_URL,
+            headers={
+                "Content-Type": "application/json; charset=UTF-8",
+                "authorization": f"Bearer {token}",
+                "appkey": settings.kis_app_key,
+                "appsecret": settings.kis_app_secret,
+                "tr_id": INTRADAY_TR_ID,
+                "custtype": "P",
+            },
+            params={
+                "FID_ETC_CLS_CODE": "",
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": ticker,
+                "FID_INPUT_HOUR_1": now_hour,
+                "FID_PW_DATA_INCU_YN": "Y",
+            },
+            timeout=5,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except Exception as exc:
+        raise KisApiError(f"KIS intraday request failed for {ticker}: {exc}") from exc
+
+    if body.get("rt_cd") != "0":
+        raise KisApiError(f"KIS intraday API returned {body.get('rt_cd')}: {body.get('msg1')}")
+
+    try:
+        rows = body["output2"]
+        points = [
+            IntradayPoint(time=_row_to_iso(row["stck_bsop_date"], row["stck_cntg_hour"]), price=float(row["stck_prpr"]))
+            for row in rows
+        ]
+    except (KeyError, ValueError, TypeError) as exc:
+        raise KisApiError(f"Unexpected KIS intraday response shape: {exc}") from exc
+
+    return list(reversed(points))  # KIS returns newest-first; a chart needs ascending order

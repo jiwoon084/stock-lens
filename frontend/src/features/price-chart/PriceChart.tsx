@@ -1,7 +1,7 @@
 import { createChart, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
-import type { PricePoint } from "../../shared/types/stock";
+import type { IntradayPoint, PricePoint } from "../../shared/types/stock";
 import type { ChartType } from "./ChartTypeToggle";
 
 export interface ChartCoordinate {
@@ -11,17 +11,36 @@ export interface ChartCoordinate {
 
 interface PriceChartProps {
   prices: PricePoint[];
+  intradayPrices?: IntradayPoint[];
+  isIntradayView?: boolean;
   selectedTime: string | null;
   chartType: ChartType;
   onSelectPoint: (point: PricePoint) => void;
   onSelectedPointCoordinate?: (coordinate: ChartCoordinate | null) => void;
 }
 
-type PriceSeries = ISeriesApi<"Candlestick"> | ISeriesApi<"Area">;
+type DailySeries = ISeriesApi<"Candlestick"> | ISeriesApi<"Area">;
 
 const WON_PRICE_FORMAT = { type: "price" as const, precision: 0, minMove: 1 };
 
-function createSeries(chart: IChartApi, chartType: ChartType): PriceSeries {
+// lightweight-charts spaces bars uniformly by array index, not by real elapsed time — mixing
+// day-granularity history with minute-granularity intraday ticks on one series would make 30
+// same-day minute bars occupy as much width as 30 historical days. So "오늘" (isIntradayView) is
+// a fully separate, homogeneous-granularity series/time-mode, never blended with the daily one.
+function isoToUtcSeconds(iso: string): number {
+  return Math.floor(Date.parse(iso) / 1000);
+}
+
+function formatIntradayTick(time: Time): string {
+  return new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Seoul",
+  }).format(new Date((time as number) * 1000));
+}
+
+function createDailySeries(chart: IChartApi, chartType: ChartType): DailySeries {
   if (chartType === "line") {
     return chart.addAreaSeries({
       lineColor: "#4f46e5",
@@ -43,11 +62,20 @@ function createSeries(chart: IChartApi, chartType: ChartType): PriceSeries {
   });
 }
 
-function applyData(series: PriceSeries, chartType: ChartType, prices: PricePoint[]) {
+function createIntradaySeries(chart: IChartApi): ISeriesApi<"Area"> {
+  return chart.addAreaSeries({
+    lineColor: "#16a34a",
+    lineWidth: 2,
+    topColor: "rgba(22, 163, 74, 0.16)",
+    bottomColor: "rgba(22, 163, 74, 0.01)",
+    priceLineVisible: false,
+    priceFormat: WON_PRICE_FORMAT,
+  });
+}
+
+function applyDailyData(series: DailySeries, chartType: ChartType, prices: PricePoint[]) {
   if (chartType === "line") {
-    (series as ISeriesApi<"Area">).setData(
-      prices.map((point) => ({ time: point.time, value: point.close })),
-    );
+    (series as ISeriesApi<"Area">).setData(prices.map((point) => ({ time: point.time, value: point.close })));
     return;
   }
   (series as ISeriesApi<"Candlestick">).setData(
@@ -61,24 +89,22 @@ function applyData(series: PriceSeries, chartType: ChartType, prices: PricePoint
   );
 }
 
-function applyMarkers(series: PriceSeries, selectedTime: string | null) {
+function applyIntradayData(series: ISeriesApi<"Area">, intradayPrices: IntradayPoint[]) {
+  series.setData(intradayPrices.map((point) => ({ time: isoToUtcSeconds(point.time) as Time, value: point.price })));
+}
+
+function applyMarkers(series: DailySeries, selectedTime: string | null) {
   series.setMarkers(
     selectedTime
-      ? [
-          {
-            time: selectedTime,
-            position: "aboveBar",
-            color: "#4f46e5",
-            shape: "arrowDown",
-            text: "선택",
-          },
-        ]
+      ? [{ time: selectedTime as Time, position: "aboveBar", color: "#4f46e5", shape: "arrowDown", text: "선택" }]
       : [],
   );
 }
 
 export function PriceChart({
   prices,
+  intradayPrices = [],
+  isIntradayView = false,
   selectedTime,
   chartType,
   onSelectPoint,
@@ -86,14 +112,20 @@ export function PriceChart({
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<PriceSeries | null>(null);
+  const seriesRef = useRef<DailySeries | ISeriesApi<"Area"> | null>(null);
   const pricesRef = useRef<PricePoint[]>(prices);
+  const intradayRef = useRef<IntradayPoint[]>(intradayPrices);
   const selectedTimeRef = useRef<string | null>(selectedTime);
   const onCoordinateRef = useRef(onSelectedPointCoordinate);
+  const isIntradayViewRef = useRef(isIntradayView);
 
   useEffect(() => {
     pricesRef.current = prices;
   }, [prices]);
+
+  useEffect(() => {
+    intradayRef.current = intradayPrices;
+  }, [intradayPrices]);
 
   useEffect(() => {
     selectedTimeRef.current = selectedTime;
@@ -103,11 +135,15 @@ export function PriceChart({
     onCoordinateRef.current = onSelectedPointCoordinate;
   }, [onSelectedPointCoordinate]);
 
+  useEffect(() => {
+    isIntradayViewRef.current = isIntradayView;
+  }, [isIntradayView]);
+
   function updateSelectedPointCoordinate() {
     const chart = chartRef.current;
     const series = seriesRef.current;
     const time = selectedTimeRef.current;
-    const point = time ? pricesRef.current.find((p) => p.time === time) : undefined;
+    const point = !isIntradayViewRef.current && time ? pricesRef.current.find((p) => p.time === time) : undefined;
 
     if (!chart || !series || !point) {
       onCoordinateRef.current?.(null);
@@ -139,13 +175,13 @@ export function PriceChart({
       },
       autoSize: true,
       // 마우스 휠로 페이지를 스크롤하다 차트 위에서 의도치 않게 확대/축소·이동되는 것을 방지 —
-      // 기간 탭(1주/2주/1개월/전체)으로만 범위를 바꾸도록 고정.
+      // 기간 탭(오늘/1주/2주/1개월/전체)으로만 범위를 바꾸도록 고정.
       handleScroll: false,
       handleScale: false,
     });
 
     chart.subscribeClick((param) => {
-      if (!param.time) return;
+      if (isIntradayViewRef.current || !param.time) return;
       const point = pricesRef.current.find((p) => p.time === param.time);
       if (!point) return;
       onSelectPoint(point);
@@ -169,36 +205,53 @@ export function PriceChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Swap the series whenever the chosen chart type changes (lightweight-charts has no
-  // "change series type in place" API — remove and re-add, then replay data/markers/selection).
+  // Recreate the series whenever chart type or intraday/daily mode changes — lightweight-charts
+  // has no "change series type in place" API, and the two modes use different time formats/tick
+  // labeling entirely (see the module comment above).
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
 
     if (seriesRef.current) {
       chart.removeSeries(seriesRef.current);
+      seriesRef.current = null;
     }
-    const series = createSeries(chart, chartType);
-    seriesRef.current = series;
 
-    applyData(series, chartType, pricesRef.current);
-    applyMarkers(series, selectedTime);
+    if (isIntradayView) {
+      chart.applyOptions({ timeScale: { tickMarkFormatter: formatIntradayTick } });
+      const series = createIntradaySeries(chart);
+      seriesRef.current = series;
+      applyIntradayData(series, intradayRef.current);
+    } else {
+      chart.applyOptions({ timeScale: { tickMarkFormatter: undefined } });
+      const series = createDailySeries(chart, chartType);
+      seriesRef.current = series;
+      applyDailyData(series, chartType, pricesRef.current);
+      applyMarkers(series, selectedTimeRef.current);
+    }
+
     chart.timeScale().fitContent();
     updateSelectedPointCoordinate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartType]);
+  }, [chartType, isIntradayView]);
 
   useEffect(() => {
     if (!seriesRef.current) return;
-    applyData(seriesRef.current, chartType, prices);
+    if (isIntradayView) {
+      applyIntradayData(seriesRef.current as ISeriesApi<"Area">, intradayPrices);
+    } else {
+      applyDailyData(seriesRef.current as DailySeries, chartType, prices);
+    }
     chartRef.current?.timeScale().fitContent();
     updateSelectedPointCoordinate();
-  }, [prices, chartType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prices, intradayPrices, chartType, isIntradayView]);
 
   useEffect(() => {
-    if (!seriesRef.current) return;
-    applyMarkers(seriesRef.current, selectedTime);
+    if (!seriesRef.current || isIntradayView) return;
+    applyMarkers(seriesRef.current as DailySeries, selectedTime);
     updateSelectedPointCoordinate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTime]);
 
   return <div className="price-chart__container" ref={containerRef} />;

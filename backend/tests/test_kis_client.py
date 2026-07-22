@@ -89,6 +89,26 @@ def test_raises_on_non_zero_rt_cd():
             kis_client.fetch_live_price("005930")
 
 
+def test_fetches_and_reorders_intraday_prices():
+    settings.kis_app_key = "test-key"
+    settings.kis_app_secret = "test-secret"
+    intraday_payload = {
+        "rt_cd": "0",
+        "output2": [
+            {"stck_bsop_date": "20260722", "stck_cntg_hour": "153000", "stck_prpr": "260500"},
+            {"stck_bsop_date": "20260722", "stck_cntg_hour": "152900", "stck_prpr": "260750"},
+        ],
+    }
+
+    with patch.object(
+        kis_client.requests, "post", return_value=_fake_response({"access_token": "tok", "expires_in": 86400})
+    ), patch.object(kis_client.requests, "get", return_value=_fake_response(intraday_payload)):
+        result = kis_client.fetch_intraday_minute_prices("005930")
+
+    assert [p.time for p in result] == ["2026-07-22T15:29:00+09:00", "2026-07-22T15:30:00+09:00"]
+    assert [p.price for p in result] == [260750.0, 260500.0]
+
+
 def test_raises_on_malformed_quote_shape():
     settings.kis_app_key = "test-key"
     settings.kis_app_secret = "test-secret"
