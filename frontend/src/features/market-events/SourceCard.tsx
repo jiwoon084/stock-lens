@@ -21,7 +21,11 @@ export function SourceCard({ source }: SourceCardProps) {
         <span className="source-card__date">{publishedDate}</span>
       </div>
       <p className="source-card__title">{source.title}</p>
-      <p className="source-card__excerpt">{source.excerpt}</p>
+      <ul className="source-card__excerpt">
+        {source.summary_lines.map((line, index) => (
+          <li key={index}>{line}</li>
+        ))}
+      </ul>
       <span className="source-card__publisher">{source.publisher}</span>
     </a>
   );

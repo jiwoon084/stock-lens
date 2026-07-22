@@ -28,6 +28,7 @@ export const MOCK_EXPLANATION: MovementExplanationResponse = {
       published_at: "2026-07-15T09:20:00+09:00",
       url: "https://example.com",
       excerpt: "실적 개선 기대가 확대되고 있다는 내용입니다.",
+      summary_lines: ["실적 개선 기대가 확대되고 있어요."],
     },
   ],
   limitations: ["공개 자료만으로 가격 변동의 직접적인 인과관계를 확정할 수 없습니다."],

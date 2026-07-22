@@ -39,6 +39,12 @@ def explain_movement(request: MovementExplanationRequest) -> MovementExplanation
         provider=request.llm_provider,
     )
 
+    source_summaries = analysis.get("source_summaries", {})
+    for source in sources:
+        lines = source_summaries.get(source.id)
+        if lines:
+            source.summary_lines = lines
+
     return MovementExplanationResponse(
         ticker=request.ticker,
         selected_date=request.selected_date,

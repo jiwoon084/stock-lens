@@ -197,6 +197,30 @@ def _fetch_document_excerpt(rcept_no: str) -> str | None:
     return text[:EXCERPT_LENGTH] if text else None
 
 
+def _naive_summary_lines(excerpt: str, max_lines: int = 2, max_line_length: int = 60) -> list[str]:
+    """Deterministic fallback for `Source.summary_lines`: chop `excerpt` into a couple of
+    space-broken chunks. Used before the LLM call runs, and left in place if the LLM call
+    fails or doesn't cover this source — expected to read worse than the LLM's own summary
+    (raw disclosure text has no clean sentence boundaries), same honesty tradeoff as the
+    rule-based factor fallback in llm_service.py.
+    """
+    text = excerpt.strip()
+    lines: list[str] = []
+    while text and len(lines) < max_lines:
+        if len(text) <= max_line_length:
+            lines.append(text)
+            text = ""
+            break
+        cut = text.rfind(" ", 0, max_line_length)
+        if cut <= 0:
+            cut = max_line_length
+        lines.append(text[:cut].strip())
+        text = text[cut:].strip()
+    if text and lines:
+        lines[-1] = lines[-1].rstrip(".") + "..."
+    return lines
+
+
 def _to_source(entry: dict) -> Source:
     rcept_dt = entry["rcept_dt"]  # "YYYYMMDD"
     published_at = f"{rcept_dt[0:4]}-{rcept_dt[4:6]}-{rcept_dt[6:8]}T00:00:00+09:00"
@@ -219,6 +243,7 @@ def _to_source(entry: dict) -> Source:
         published_at=published_at,
         url=f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}",
         excerpt=excerpt,
+        summary_lines=_naive_summary_lines(excerpt),
     )
 
 
@@ -250,6 +275,7 @@ def _news_to_source(article: dict, index: int) -> Source:
         published_at=published_at,
         url=article["link"],
         excerpt=article["description"],
+        summary_lines=_naive_summary_lines(article["description"]),
     )
 
 
@@ -265,6 +291,7 @@ def _mock_documents(ticker: str, selected_date: str, direction: str) -> list[Sou
             published_at=f"{selected_date}T09:20:00+09:00",
             url="https://example.com/news/1",
             excerpt=f"{selected_date} 전후로 {tone} 수급 변화가 관찰되었다는 내용입니다.",
+            summary_lines=[f"{selected_date} 전후로 {tone} 수급 변화가 있었어요."],
         ),
         Source(
             id="source-2",
@@ -274,6 +301,7 @@ def _mock_documents(ticker: str, selected_date: str, direction: str) -> list[Sou
             published_at=f"{selected_date}T08:00:00+09:00",
             url="https://example.com/report/1",
             excerpt="업황 및 실적 전망에 대한 애널리스트 의견을 요약한 리포트 발췌입니다.",
+            summary_lines=["업황과 실적 전망에 대한 애널리스트 의견이에요."],
         ),
         Source(
             id="source-3",
@@ -283,6 +311,7 @@ def _mock_documents(ticker: str, selected_date: str, direction: str) -> list[Sou
             published_at=f"{selected_date}T16:00:00+09:00",
             url="https://example.com/disclosure/1",
             excerpt="공개된 공시 자료 중 가격 변동과 관련될 수 있는 항목 발췌입니다.",
+            summary_lines=["가격 변동과 관련될 수 있는 공시 항목이에요."],
         ),
     ]
 

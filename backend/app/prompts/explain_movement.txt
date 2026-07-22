@@ -16,6 +16,16 @@ not invent documents that were not given to you.
 IMPORTANT: every source_ids value you output MUST be one of the exact [id] tags shown above.
 Never invent an id. If a factor has no supporting document, use an empty list for source_ids.
 
+Also write a short plain-language summary of EACH retrieved document above, for display on its
+own card (not about the price movement — just what that one document says). One entry per
+document, covering every [id] shown above:
+- "lines": at most 3 short lines, each a complete thought (e.g. "~했어요" style), one fact per
+  line — like a 3-line news summary, not a single run-on sentence.
+- Do not inline-cite ids in the lines (no "(news-1)"-style citations) — the id is already given
+  separately as source_id.
+- Base each summary only on that document's own excerpt text; do not pull in facts from other
+  documents.
+
 Respond with ONLY a single JSON object — no markdown code fences, no commentary before or
 after it — matching exactly this shape:
 
@@ -26,7 +36,11 @@ after it — matching exactly this shape:
   "factors": [
     {{ "title": "...", "impact": "positive" | "negative" | "neutral", "description": "...", "source_ids": ["..."] }}
   ],
-  "limitations": ["caveats about what this analysis cannot prove, e.g. correlation vs causation, incomplete document coverage"]
+  "limitations": ["caveats about what this analysis cannot prove, e.g. correlation vs causation, incomplete document coverage"],
+  "source_summaries": [
+    {{ "source_id": "...", "lines": ["...", "..."] }}
+  ]
 }}
 
-Write headline, summary, factor titles/descriptions, and limitations in Korean.
+Write headline, summary, factor titles/descriptions, limitations, and source_summaries lines in
+Korean.
