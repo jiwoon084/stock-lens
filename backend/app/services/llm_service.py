@@ -11,7 +11,7 @@ fallback is a resilience measure, not the primary selection logic.
 Both providers expose an OpenAI-compatible chat completions endpoint, so a single
 `openai.OpenAI` client (pointed at a different base_url/api_key/model per provider) covers
 both — no provider-specific SDK needed. Retrieval (which documents count as evidence) stays the
-deterministic logic in retrieval_service.py/checklist_service.py; only the natural-language
+deterministic logic in retrieval_service.py; only the natural-language
 write-up here is LLM-generated, and the prompt only lets it cite source ids it was actually
 given (see app/prompts/explain_movement.txt) — this keeps the "출처 기반 신뢰성" guarantee even
 once a real model is writing the prose.
