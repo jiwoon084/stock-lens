@@ -1,5 +1,6 @@
 import type { ExplanationStatus } from "../movement-explanation/useMovementExplanation";
-import type { MovementExplanationResponse } from "../../shared/types/explanation";
+import { LlmProviderToggle } from "../movement-explanation/LlmProviderToggle";
+import type { LlmProvider, MovementExplanationResponse } from "../../shared/types/explanation";
 import type { PricePoint } from "../../shared/types/stock";
 import { Card } from "../../shared/components/Card";
 import { EventCard } from "./EventCard";
@@ -12,6 +13,8 @@ interface MarketEventsPanelProps {
   status: ExplanationStatus;
   data: MovementExplanationResponse | null;
   error: string | null;
+  llmProvider: LlmProvider;
+  onChangeProvider: (provider: LlmProvider) => void;
   onSelectPoint: (point: PricePoint) => void;
   onRetry: () => void;
 }
@@ -22,6 +25,8 @@ export function MarketEventsPanel({
   status,
   data,
   error,
+  llmProvider,
+  onChangeProvider,
   onSelectPoint,
   onRetry,
 }: MarketEventsPanelProps) {
@@ -49,9 +54,12 @@ export function MarketEventsPanel({
       )}
 
       <div className="market-events__sources">
-        <h4 className="market-events__sources-title">
-          {selectedPoint ? `${selectedPoint.time} 관련 자료` : "관련 자료"}
-        </h4>
+        <div className="market-events__sources-header">
+          <h4 className="market-events__sources-title">
+            {selectedPoint ? `${selectedPoint.time} 관련 자료` : "관련 자료"}
+          </h4>
+          <LlmProviderToggle provider={llmProvider} onChange={onChangeProvider} />
+        </div>
 
         {!selectedPoint && (
           <p className="empty-state">위 카드 또는 차트에서 날짜를 선택하면 관련 자료가 여기에 표시됩니다.</p>

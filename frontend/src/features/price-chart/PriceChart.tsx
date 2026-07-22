@@ -1,14 +1,20 @@
-import { createChart, type IChartApi, type ISeriesApi } from "lightweight-charts";
+import { createChart, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
 import type { PricePoint } from "../../shared/types/stock";
 import type { ChartType } from "./ChartTypeToggle";
+
+export interface ChartCoordinate {
+  x: number;
+  y: number;
+}
 
 interface PriceChartProps {
   prices: PricePoint[];
   selectedTime: string | null;
   chartType: ChartType;
   onSelectPoint: (point: PricePoint) => void;
+  onSelectedPointCoordinate?: (coordinate: ChartCoordinate | null) => void;
 }
 
 type PriceSeries = ISeriesApi<"Candlestick"> | ISeriesApi<"Area">;
@@ -71,15 +77,47 @@ function applyMarkers(series: PriceSeries, selectedTime: string | null) {
   );
 }
 
-export function PriceChart({ prices, selectedTime, chartType, onSelectPoint }: PriceChartProps) {
+export function PriceChart({
+  prices,
+  selectedTime,
+  chartType,
+  onSelectPoint,
+  onSelectedPointCoordinate,
+}: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<PriceSeries | null>(null);
   const pricesRef = useRef<PricePoint[]>(prices);
+  const selectedTimeRef = useRef<string | null>(selectedTime);
+  const onCoordinateRef = useRef(onSelectedPointCoordinate);
 
   useEffect(() => {
     pricesRef.current = prices;
   }, [prices]);
+
+  useEffect(() => {
+    selectedTimeRef.current = selectedTime;
+  }, [selectedTime]);
+
+  useEffect(() => {
+    onCoordinateRef.current = onSelectedPointCoordinate;
+  }, [onSelectedPointCoordinate]);
+
+  function updateSelectedPointCoordinate() {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    const time = selectedTimeRef.current;
+    const point = time ? pricesRef.current.find((p) => p.time === time) : undefined;
+
+    if (!chart || !series || !point) {
+      onCoordinateRef.current?.(null);
+      return;
+    }
+
+    const x = chart.timeScale().timeToCoordinate(point.time as Time);
+    const y = series.priceToCoordinate(point.close);
+    onCoordinateRef.current?.(x === null || y === null ? null : { x, y });
+  }
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -115,7 +153,15 @@ export function PriceChart({ prices, selectedTime, chartType, onSelectPoint }: P
 
     chartRef.current = chart;
 
+    const resizeObserver = new ResizeObserver(() => updateSelectedPointCoordinate());
+    resizeObserver.observe(containerRef.current);
+
+    const handleVisibleTimeRangeChange = () => updateSelectedPointCoordinate();
+    chart.timeScale().subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+
     return () => {
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -138,6 +184,7 @@ export function PriceChart({ prices, selectedTime, chartType, onSelectPoint }: P
     applyData(series, chartType, pricesRef.current);
     applyMarkers(series, selectedTime);
     chart.timeScale().fitContent();
+    updateSelectedPointCoordinate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartType]);
 
@@ -145,11 +192,13 @@ export function PriceChart({ prices, selectedTime, chartType, onSelectPoint }: P
     if (!seriesRef.current) return;
     applyData(seriesRef.current, chartType, prices);
     chartRef.current?.timeScale().fitContent();
+    updateSelectedPointCoordinate();
   }, [prices, chartType]);
 
   useEffect(() => {
     if (!seriesRef.current) return;
     applyMarkers(seriesRef.current, selectedTime);
+    updateSelectedPointCoordinate();
   }, [selectedTime]);
 
   return <div className="price-chart__container" ref={containerRef} />;

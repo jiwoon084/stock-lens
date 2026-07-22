@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     dart_api_key: str = ""
     krx_api_key: str = ""
 
+    # Default provider for POST /api/analysis/date (app/services/llm/factory.py) — "solar" or
+    # "gemini" (gemini_provider.py is interface-only for now, see its docstring). Unrelated to
+    # the older /api/v1/explanations feature's user-selectable llm_provider request field.
+    llm_provider: str = "solar"
+
     @property
     def allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]

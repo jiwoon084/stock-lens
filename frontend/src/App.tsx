@@ -1,17 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChartToolbar, filterPricesByPeriod, type ChartPeriod } from "./features/price-chart/ChartToolbar";
 import { ChartTypeToggle, type ChartType } from "./features/price-chart/ChartTypeToggle";
-import { PriceChart } from "./features/price-chart/PriceChart";
+import { PriceChart, type ChartCoordinate } from "./features/price-chart/PriceChart";
 import { SelectedPointInfo } from "./features/price-chart/SelectedPointInfo";
 import { StockHeader } from "./features/price-chart/StockHeader";
 import { usePriceChart } from "./features/price-chart/usePriceChart";
-import { AIAnalysisPanel } from "./features/movement-explanation/AIAnalysisPanel";
 import { useMovementExplanation } from "./features/movement-explanation/useMovementExplanation";
 import { MarketEventsPanel } from "./features/market-events/MarketEventsPanel";
 import { StockSelector } from "./features/stock-selector/StockSelector";
 import { useStocks } from "./features/stock-selector/useStocks";
-import { ArticleChecklist } from "./features/article-checklist/ArticleChecklist";
+import { ChartSummaryCard } from "./components/analysis/ChartSummaryCard";
+import { ChartMovementPopover } from "./components/analysis/ChartMovementPopover";
+import { AnalysisDetailPanel } from "./components/analysis/AnalysisDetailPanel";
+import { useStockAnalysis } from "./components/analysis/useStockAnalysis";
 import { Card } from "./shared/components/Card";
 import { LoadingSpinner } from "./shared/components/LoadingSpinner";
 import type { LlmProvider } from "./shared/types/explanation";
@@ -23,15 +25,40 @@ export default function App() {
   const [chartType, setChartType] = useState<ChartType>("candle");
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("solar");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
+  const [pointCoordinate, setPointCoordinate] = useState<ChartCoordinate | null>(null);
+  const [chartWidth, setChartWidth] = useState(0);
+  const chartWrapperResizeObserverRef = useRef<ResizeObserver | null>(null);
+
+  // A plain ref + a mount-only effect would miss this node — it doesn't exist yet while
+  // pricesLoading is true, so it only appears after the initial render. A callback ref fires
+  // whenever the node is actually attached/detached, which is what re-observing needs here.
+  const chartWrapperRef = useCallback((node: HTMLDivElement | null) => {
+    chartWrapperResizeObserverRef.current?.disconnect();
+    chartWrapperResizeObserverRef.current = null;
+    if (!node) return;
+
+    setChartWidth(node.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => setChartWidth(entry.contentRect.width));
+    observer.observe(node);
+    chartWrapperResizeObserverRef.current = observer;
+  }, []);
 
   const stocks = useStocks();
   const { prices, loading: pricesLoading, error: pricesError } = usePriceChart(ticker);
   const { status, data, error, explain, reset } = useMovementExplanation();
+  const {
+    status: analysisStatus,
+    data: analysisData,
+    error: analysisError,
+    analyze,
+    reset: resetAnalysis,
+  } = useStockAnalysis();
 
   useEffect(() => {
     setSelectedPoint(null);
     reset();
-  }, [ticker, reset]);
+    resetAnalysis();
+  }, [ticker, reset, resetAnalysis]);
 
   const visiblePrices = filterPricesByPeriod(prices, period);
 
@@ -42,15 +69,24 @@ export default function App() {
   function handleSelectPoint(point: PricePoint) {
     setSelectedPoint(point);
     void explain(ticker, point.time, "1d", llmProvider);
+    void analyze(ticker, point.time);
   }
 
   function handleRetry() {
     if (selectedPoint) void explain(ticker, selectedPoint.time, "1d", llmProvider);
   }
 
+  function handleRetryAnalysis() {
+    if (selectedPoint) void analyze(ticker, selectedPoint.time);
+  }
+
   function handleChangeProvider(provider: LlmProvider) {
     setLlmProvider(provider);
     if (selectedPoint) void explain(ticker, selectedPoint.time, "1d", provider);
+  }
+
+  function handleSelectPrimaryEvidence(sourceId: string) {
+    document.getElementById(`source-${sourceId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   return (
@@ -82,13 +118,31 @@ export default function App() {
               <LoadingSpinner label="가격 데이터를 불러오는 중입니다..." />
             ) : (
               <>
-                <PriceChart
-                  prices={visiblePrices}
-                  selectedTime={selectedPoint?.time ?? null}
-                  chartType={chartType}
-                  onSelectPoint={handleSelectPoint}
-                />
+                <div className="price-chart__wrapper" ref={chartWrapperRef}>
+                  <PriceChart
+                    prices={visiblePrices}
+                    selectedTime={selectedPoint?.time ?? null}
+                    chartType={chartType}
+                    onSelectPoint={handleSelectPoint}
+                    onSelectedPointCoordinate={setPointCoordinate}
+                  />
+                  <ChartMovementPopover
+                    status={analysisStatus}
+                    items={analysisData?.analysis.detail_panel.why_it_moved ?? []}
+                    error={analysisError}
+                    coordinate={pointCoordinate}
+                    containerWidth={chartWidth}
+                    resetKey={selectedPoint?.time ?? ""}
+                  />
+                </div>
                 <SelectedPointInfo point={selectedPoint} />
+                <ChartSummaryCard
+                  status={analysisStatus}
+                  chartCard={analysisData?.analysis.chart_card ?? null}
+                  error={analysisError}
+                  sources={analysisData?.sources ?? {}}
+                  onSelectPrimaryEvidence={handleSelectPrimaryEvidence}
+                />
               </>
             )}
           </Card>
@@ -99,26 +153,22 @@ export default function App() {
             status={status}
             data={data}
             error={error}
+            llmProvider={llmProvider}
+            onChangeProvider={handleChangeProvider}
             onSelectPoint={handleSelectPoint}
             onRetry={handleRetry}
           />
         </div>
 
         <div className="workspace__side">
-          <AIAnalysisPanel
-            status={status}
-            data={data}
-            error={error}
+          <AnalysisDetailPanel
+            status={analysisStatus}
+            data={analysisData}
+            error={analysisError}
             ticker={ticker}
             selectedDate={selectedPoint?.time ?? null}
-            llmProvider={llmProvider}
-            onChangeProvider={handleChangeProvider}
-            onRetry={handleRetry}
+            onRetry={handleRetryAnalysis}
           />
-
-          <Card title="오늘의 체크리스트">
-            <ArticleChecklist ticker={ticker} />
-          </Card>
         </div>
       </div>
     </div>
