@@ -59,13 +59,16 @@ Real keys are never committed — only `SOLAR_API_KEY=` / `GEMINI_API_KEY=` / `D
 `KRX_API_KEY=` placeholders exist in `.env.example`, and `deploy.yml` injects them via
 `--set-secrets`, not plain env vars.
 
-**`DART_API_KEY` and `KRX_API_KEY` are the ones actually used today**
-(`app/services/retrieval_service.py` and `app/services/krx_price_client.py`). Without
-`DART_API_KEY`, `/api/v1/explanations` still works but always returns the "no related
-disclosures found" response. Without `KRX_API_KEY` (or if the data.go.kr call fails for any
-reason), `/api/v1/stocks/{ticker}/prices` falls back to mock prices instead of erroring —
-see `app/services/market_data_service.py`. `SOLAR_API_KEY`/`GEMINI_API_KEY` remain unused
-placeholders until M3 (see `docs/project-plan.md`).
+**All four are actually used today** — `DART_API_KEY`/`KRX_API_KEY` for real disclosures/prices
+(`app/services/retrieval_service.py`, `app/services/krx_price_client.py`), and
+`SOLAR_API_KEY`/`GEMINI_API_KEY` for the real SOLAR/Gemini call the frontend's
+`LlmProviderToggle` picks per-request in `app/services/llm_service.py` (M3, see
+`docs/project-plan.md`; CLAUDE.md section 9 — not automatic routing, don't "fix" this without
+reading that section first). Every one of them degrades gracefully if missing:
+`/api/v1/explanations` falls back to a rule-based/mock response, `/api/v1/stocks/{ticker}/prices`
+falls back to mock prices — nothing 500s on a missing key. The newer `POST /api/analysis/date`
+(CLAUDE.md section 10) reuses the same `SOLAR_API_KEY`/`GEMINI_API_KEY` secrets but picks a
+provider from env var `LLM_PROVIDER` instead of a per-request field.
 
 **Known gap**: `backend/Dockerfile` only copies `app/` into the image — `data/disclosures.json`
 (the DART snapshot) is not baked in, and there's no volume mount in production the way

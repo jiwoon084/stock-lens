@@ -90,8 +90,7 @@ feed the analysis, the agreed tiering was:
      `data/news.json`에 저장 (`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` 필요, 없으면 스크립트만
      못 돌리는 것이고 서비스 자체는 안 죽음). `retrieval_service.get_related_documents()`가
      공시(최대 `DISCLOSURE_SLOTS`=3자리 우선)와 뉴스를 합쳐서 최대 5건을 반환 — 한쪽이 모자라면
-     다른 쪽이 채움. `article-checklist` 기능("오늘의 체크리스트")은 같은 뉴스 데이터를
-     `checklist_service.py`로 별도 가공해서 보여줌.
+     다른 쪽이 채움.
    - **Not done**: 자기주식취득결정 has zero real occurrences in the current 5-ticker sample so
      its formatter is unverified; other DART event-specific APIs (배당결정, 회사분할, 소송 등)
      aren't wired at all. 증권사 리서치 리포트(한경 컨센서스 등)는 여전히 미연동.
@@ -99,19 +98,20 @@ feed the analysis, the agreed tiering was:
    per-request `llm_provider` field (`"solar"` | `"gemini"`, default `"solar"`) — see
    `app/services/solar_client.py` / `gemini_client.py`. Both call their provider's native REST
    API directly with `requests` (no SDK) and enforce a JSON-schema-constrained response, so the
-   model's output always parses into `Factor`/`limitations` cleanly. **A parallel branch briefly
-   existed with an automatic SOLAR→Gemini→Groq fallback chain built on the `openai` SDK
-   (`e258fd0`/`2de919d`) — deliberately not kept** (2026-07-21 decision): the product calls for
-   the user to explicitly pick a model (see `frontend/.../LlmProviderToggle.tsx`), not an
-   invisible 3-way fallback, and Groq was never part of the ask. If a per-request pick is ever
-   not enough (e.g. need automatic retry across providers), that branch's `_call_provider`/
-   `_providers()` pattern in `llm_service.py` history is a reasonable starting point to revive.
+   model's output always parses into `Factor`/`limitations` cleanly. **A parallel branch has
+   twice tried an automatic difficulty-based/fallback routing scheme instead (most recently
+   2026-07-22) — deliberately reverted both times, most recently confirmed directly with the
+   user in the same session that built the feature below.** See CLAUDE.md section 9 before
+   touching this again — this has now flip-flopped three times and the team needs to sync in
+   person before it changes a fourth. If a per-request pick is ever not enough (e.g. need
+   automatic retry across providers), the auto-routing branch's `_providers_for()` pattern is
+   preserved in git history (`e258fd0`/`2de919d`/`6a290b4` and later reverts) as a starting point.
    - Falls back to a deterministic, source-grounded rule-based response (each factor built from
      an actual retrieved document's title/excerpt, not templated text) if the chosen provider's
      key is missing, or the call fails for any reason — verified by unit tests
      (`test_solar_client.py`, `test_gemini_client.py`, `test_llm_service.py`) that never hit the
      network, plus real end-to-end calls against both providers (see below).
-   - **Verified 2026-07-21 against real keys, both providers**: SOLAR via `solar-pro2`
+   - **Verified against real keys, both providers**: SOLAR via `solar-pro2`
      (`https://api.upstage.ai/v1/chat/completions`, OpenAI-compatible). Gemini required two
      rounds of empirical fixing — a freshly created API key 404'd on the dated model name
      `gemini-2.5-flash` ("no longer available to new users"), and separately a different key hit
@@ -124,6 +124,11 @@ feed the analysis, the agreed tiering was:
      backstop, in case a model ignores the instruction.
    - `backend/app/agent/` still holds an early, untouched LangGraph skeleton
      (`state.py`/`nodes.py`/`graph.py`, TODO stubs) — not used by the above.
+4b. **M3.5 — separate `POST /api/analysis/date` endpoint (2026-07-22)**: powers a chart-point
+    popover, a small summary card under the chart, and the "오늘의 체크리스트" sidebar panel —
+    see `docs/api-spec.md` and CLAUDE.md section 10. Has its own provider layer
+    (`app/services/llm/`) fixed by env var `LLM_PROVIDER` (no user-facing toggle yet); completely
+    independent of the M3 dispatcher above, do not conflate the two when resolving future merges.
 5. **M4 — GCP deployment — not started**: complete the one-time setup in `infra/gcp-setup.md`,
    then let `.github/workflows/deploy.yml` run for real. Now also needs `DART_API_KEY` in Secret
    Manager (same pattern as SOLAR/GEMINI) and confirmation that the Cloud Run backend has

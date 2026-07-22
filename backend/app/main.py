@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import analysis, checklist, explanations, health, stocks
+from app.api.routes import analysis, explanations, health, stocks
 from app.core.config import settings
 
 app = FastAPI(title="Stock Lens API")
@@ -17,7 +17,6 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(stocks.router)
 app.include_router(explanations.router)
-app.include_router(checklist.router)
 app.include_router(analysis.router)
 
 

@@ -1,9 +1,17 @@
 # Screen Design
 
 Stock Lens is a single screen (no routing) implemented in `frontend/src/App.tsx`, composed of a
-top bar, a stock summary bar, and a two-column workspace: chart + market-events on the left,
-an AI analysis report panel on the right (sticky). Light, Koyfin-inspired chrome; the events
-panel below the chart borrows Perplexity Finance's "notable moves" card row.
+top bar, a stock summary bar, and a two-column workspace: chart + market-events on the left, a
+"오늘의 체크리스트" panel on the right (sticky). Light, Koyfin-inspired chrome; the events panel
+below the chart borrows Perplexity Finance's "notable moves" card row.
+
+⚠️ Updated 2026-07-22 (CLAUDE.md section 10) — clicking a chart point now populates **three**
+separate areas from **two** separate backend calls: the older `POST /api/v1/explanations` still
+feeds `MarketEventsPanel`'s "관련 자료" list and its `LlmProviderToggle`, while a newer
+`POST /api/analysis/date` feeds a popover anchored to the clicked point, a small summary card
+under the chart, and the right-side panel (renamed from "AI 분석 리포트"). The diagram below
+only shows the right-side panel's *current* content; see the component table for the popover/
+summary card.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -13,16 +21,17 @@ panel below the chart borrows Perplexity Finance's "notable moves" card row.
 │ 삼성전자 KOSPI  005930                              84,400원  ▼ -2.65%     │
 │                                                       업데이트 기준 ...     │
 ├───────────────────────────────────────────────┬─────────────────────────┤
-│ [주가 차트]                    (1주)(2주)(1개월)(전체) │ AI 분석 리포트  [분석 완료]│
+│ [주가 차트]                    (1주)(2주)(1개월)(전체) │ 오늘의 체크리스트 [완료]  │
 │ ┌─────────────────────────────────────────┐   │ 005930 · 2026-07-17 기준 │
-│ │  candlestick chart (440px)                │   │ ▼ -2.65%    신뢰도 보통  │
-│ │  클릭 시 마커로 선택 지점 표시              │   │ 헤드라인 ...            │
-│ └─────────────────────────────────────────┘   │ 요약 문단 ...            │
-│ 2026-07-17  84,400원  -2.65%  거래량 +236.6%   │ 주요 요인 3개            │
-├───────────────────────────────────────────────┤ ☐ [유의] 자기주식처분... │
-│ [주목할 만한 가격변동]                          │   출처 1건 보기          │
-│ (07-13 ▼-2.1%)(07-15 ▲+3.4%)(07-17 ▼-2.65%)... │ 확인 완료 0/3            │
-│  ← 가로 스크롤, 선택된 날짜는 강조                │ 분석의 한계 ...          │
+│ │  candlestick chart (440px)                │   │ 앞으로 확인할 내용        │
+│ │  클릭 지점에 팝오버: "이날 왜 움직였나요?"    │   │ ☐ 계약 내용이 실적에...   │
+│ └─────────────────────────────────────────┘   │ 더 읽어볼 자료           │
+│ 2026-07-17  84,400원  -2.65%  거래량 +236.6%   │ [공시] 주요사항보고서 ... │
+│ (요약 카드) -2.65%, 한줄요약, 핵심수치, 근거배지  │   원문 보기              │
+├───────────────────────────────────────────────┤ 주의: 공개된 정보만으로... │
+│ [주목할 만한 가격변동]           분석 모델(SOLAR)(Gemini)│                  │
+│ (07-13 ▼-2.1%)(07-15 ▲+3.4%)(07-17 ▼-2.65%)... │                         │
+│  ← 가로 스크롤, 선택된 날짜는 강조                │                         │
 │ 2026-07-17 관련 자료                           │                         │
 │  [공시] 자기주식처분결과보고서 · DART · 삼성전자  │                         │
 │  [공시] 주요사항보고서 ...                      │                         │
@@ -38,46 +47,62 @@ panel below the chart borrows Perplexity Finance's "notable moves" card row.
 | `StockHeader` | `features/price-chart/StockHeader.tsx` | pure display of name/market/code + latest close, change, and "업데이트 기준" date, derived from `prices` (unfiltered by period) |
 | `ChartToolbar` | `features/price-chart/ChartToolbar.tsx` | period (`1w`/`2w`/`1m`/`all`), filters prices client-side; rendered as the chart card's header action |
 | `ChartTypeToggle` | `features/price-chart/ChartTypeToggle.tsx` | candle/line switch (icon buttons next to the chart card title); swaps the lightweight-charts series in place, keeps zoom + selection marker |
-| `PriceChart` | `features/price-chart/PriceChart.tsx` | renders candlesticks or a line/area series depending on `chartType`, emits click → `PricePoint`, marks the selected time with a chart marker (no embedded popover) |
+| `PriceChart` | `features/price-chart/PriceChart.tsx` | renders candlesticks or a line/area series depending on `chartType`, emits click → `PricePoint`, marks the selected time with a chart marker, and exposes the selected point's pixel coordinate via `onSelectedPointCoordinate` (for the popover below) |
 | `SelectedPointInfo` | `features/price-chart/SelectedPointInfo.tsx` | pure display strip under the chart: selected date's price/등락률/거래량, or an idle hint |
-| `AIAnalysisPanel` | `features/movement-explanation/AIAnalysisPanel.tsx` | report container — idle/loading/error/success states, header (status pill + ticker/date), `LlmProviderToggle`, headline, summary, confidence, delegates factor list to `IssueChecklist`, renders limitations |
-| `LlmProviderToggle` | `features/movement-explanation/LlmProviderToggle.tsx` | SOLAR/Gemini switch; changing it re-runs `explain()` for the currently-selected date if one is selected |
-| `IssueChecklist` | `features/movement-explanation/IssueChecklist.tsx` | pure display of a given `data`'s factors, plus local (non-persisted) checkbox/expand state |
-| `ExplanationLoading` | `features/movement-explanation/ExplanationLoading.tsx` | skeleton placeholder (shimmer bars) shown only on the *first* load for a ticker (no prior data to keep visible) |
-| `MarketEventsPanel` | `features/market-events/MarketEventsPanel.tsx` | "주목할 만한 가격변동" card row (derived client-side from `prices` via `selectNotableMovements`, no extra API calls) + a "선택한 날짜의 관련 자료" sub-panel driven by the same explanation state as the AI panel |
+| `ChartMovementPopover` | `components/analysis/ChartMovementPopover.tsx` | floating box anchored to the clicked chart point (flips left/right to stay inside the chart), renders `MovementSection` inside; dismissible, re-appears on the next point selection |
+| `MovementSection` | `components/analysis/MovementSection.tsx` | "이날 왜 움직였나요?" — pure display of `why_it_moved` items (evidence-type tag + status label + title/description); used only inside the popover now |
+| `ChartSummaryCard` | `components/analysis/ChartSummaryCard.tsx` | small card under the chart: selected date, price-change text, one-line AI summary, up to 2 quick facts, a clickable primary-evidence badge that scrolls to that source in `RecommendedMaterials` |
+| `AnalysisDetailPanel` | `components/analysis/AnalysisDetailPanel.tsx` | the right-side panel, titled "오늘의 체크리스트" — idle/loading/error/success states, header (status pill + ticker/date), renders `WatchChecklist` + `RecommendedMaterials` + `AnalysisCaution` |
+| `WatchChecklist` | `components/analysis/WatchChecklist.tsx` | "앞으로 확인할 내용" — checkbox list of `what_to_watch` items, local (non-persisted) checked state, resets when the selected date changes |
+| `RecommendedMaterials` | `components/analysis/RecommendedMaterials.tsx` | "더 읽어볼 자료" — cards combining `recommended_materials` (LLM description/topics) with the backend's `sources` map (real title/url/publisher/date); `id="source-{id}"` on each card is the scroll target for `ChartSummaryCard`'s evidence badge |
+| `AnalysisCaution` | `components/analysis/AnalysisCaution.tsx` | one-line caution sentence at the bottom of the panel |
+| `useStockAnalysis` | `components/analysis/useStockAnalysis.ts` | hook backing all of the above — calls `POST /api/analysis/date`, clears previous data immediately on a new call so a stale date's result is never shown as if it were current |
+| `AIAnalysisPanel` / `IssueChecklist` / `ExplanationLoading` | `features/movement-explanation/` | still exist and still work (backed by `useMovementExplanation` / `/api/v1/explanations`), but **not rendered directly in `App.tsx` anymore** — superseded by the components above for the main report. `LlmProviderToggle` from this same folder is still rendered, just relocated (see next row) |
+| `MarketEventsPanel` | `features/market-events/MarketEventsPanel.tsx` | "주목할 만한 가격변동" card row (derived client-side from `prices` via `selectNotableMovements`) + `LlmProviderToggle` (SOLAR/Gemini picker for `/api/v1/explanations`, moved here from the old AI panel) + a "관련 자료" sub-panel driven by `useMovementExplanation`'s state |
 | `EventCard` | `features/market-events/EventCard.tsx` | one notable-movement card (date/방향/등락률/거래량 변화); click reselects that date, same as clicking the chart |
 | `SourceCard` | `features/market-events/SourceCard.tsx` | one `Source` (news/disclosure/report) card — type badge, date, title, excerpt, publisher, links out |
-| `ArticleChecklist` | `features/article-checklist/ArticleChecklist.tsx` | "오늘의 체크리스트" — independent of chart selection, always shows today's news-derived checklist for the current `ticker` via its own `useArticleChecklist` hook; sits below `AIAnalysisPanel`, not wired to `selectedPoint` |
 
-`App.tsx` owns `ticker`, `period`, `chartType`, `llmProvider`, and `selectedPoint` state, plus
-the `useMovementExplanation` hook's `status/data/error/reset`. Selecting a chart point *or* an
-event card synchronously updates `selectedPoint` and triggers the same `explain()` call (now
-also passing `llmProvider`) — there is no separate "요청" button, and both entry points feed the
-same state so the chart marker, the selected event card, and the AI panel's date all move
-together. Switching `llmProvider` re-issues `explain()` immediately if a date is already
-selected, so the same date's report can be compared across providers. Changing `ticker` resets
-both `selectedPoint` and the explanation state (`reset()`), so no stale result from a previous
-stock lingers.
+There is no separate "오늘의 체크리스트" *news* panel anymore — `ArticleChecklist` and its whole
+backend slice (`checklist.py` route/schema/service) were deliberately removed (redundant with the
+factor checklist, no disagreement between sessions on this one — see CLAUDE.md section 4/7). The
+*current* "오늘의 체크리스트" title refers to `AnalysisDetailPanel` above, a renamed/trimmed
+version of the old AI analysis panel — same name, different feature, don't confuse the two.
+
+`App.tsx` owns `ticker`, `period`, `chartType`, `llmProvider`, `selectedPoint`,
+`pointCoordinate`, and `chartWidth` state, plus both `useMovementExplanation`'s
+`status/data/error/reset` and `useStockAnalysis`'s `status/data/error/reset`. Selecting a chart
+point *or* an event card synchronously updates `selectedPoint` and triggers **both**
+`explain()` (old, feeds `MarketEventsPanel`) and `analyze()` (new, feeds the popover/summary
+card/side panel) — there is no separate "요청" button. This means one click issues two backend
+LLM calls; see CLAUDE.md section 10's TODO list re: merging them later. Changing `ticker` resets
+both hooks' state, so no stale result from a previous stock lingers. `chartWidth` is measured via
+a callback ref on the chart wrapper (a plain `useRef` + mount-only `useEffect` would miss the
+node while `pricesLoading` is still true — see the "실제 버그" note in CLAUDE.md section 10).
 
 ## States explicitly covered
 
 - Stock price loading (`usePriceChart` loading flag, shown via `LoadingSpinner`) and its own
   error fallback to mock data (`error-banner` in the chart card)
-- No point selected yet (idle): chart shows no marker, `SelectedPointInfo` shows a hint,
-  `AIAnalysisPanel` shows a guidance message, `MarketEventsPanel` still shows the notable-moves
-  row (computed from prices alone) with a hint in the sources sub-panel
-- Explanation loading: if this is the *first* analysis for the ticker (`data` is still `null`),
-  both `AIAnalysisPanel` and the events panel's sources sub-panel show a skeleton. If a previous
-  result already exists (the user clicked a new point while one was showing), that previous
-  content stays visible at reduced opacity with a small "새로운 분석/자료를 불러오는 중..." badge
-  instead of disappearing — `useMovementExplanation` doesn't clear `data` on a new `explain()`
-  call, and the UI takes advantage of that instead of blanking the panel.
-- Explanation success — `AIAnalysisPanel` shows headline/summary/confidence/factor
-  checklist/limitations; `MarketEventsPanel`'s sources sub-panel lists that date's
-  `sources` as cards (empty state if `sources` is empty)
-- Explanation error — `error-banner` + a "다시 시도" retry button in both `AIAnalysisPanel` and
-  `MarketEventsPanel` (both call the same retry, which re-issues `explain()` for the current
-  `selectedPoint`)
+- No point selected yet (idle): chart shows no marker and no popover, `SelectedPointInfo` and
+  `ChartSummaryCard` show hints, `AnalysisDetailPanel` shows a guidance message,
+  `MarketEventsPanel` still shows the notable-moves row (computed from prices alone) with a hint
+  in the sources sub-panel
+- Loading, two different behaviors by design: the **old** `/api/v1/explanations` state
+  (`useMovementExplanation`) does *not* clear `data` on a new `explain()` call, so
+  `MarketEventsPanel`'s sources sub-panel keeps showing the previous result dimmed with a
+  "새로운 자료를 불러오는 중..." badge. The **new** `/api/analysis/date` state
+  (`useStockAnalysis`) clears `data` to `null` immediately on `analyze()`, so
+  `ChartMovementPopover`/`ChartSummaryCard`/`AnalysisDetailPanel` show a skeleton instead of a
+  stale previous date's result — this was an explicit product requirement (never let one date's
+  analysis look like it belongs to another).
+- Analysis success — `ChartMovementPopover` shows `why_it_moved` next to the clicked point,
+  `ChartSummaryCard` shows the one-line summary/quick facts/evidence badge,
+  `AnalysisDetailPanel` shows `what_to_watch`/`recommended_materials`/caution (or a single
+  "자료가 충분하지 않다" message if both are empty); separately, `MarketEventsPanel`'s sources
+  sub-panel lists that date's `/api/v1/explanations` `sources` as cards
+- Error — `error-banner` + "다시 시도" retry buttons, one pair per feature (`AnalysisDetailPanel`
+  re-issues `analyze()`, `MarketEventsPanel` re-issues `explain()` — they're independent, so one
+  can fail while the other succeeds)
 
 ## Known limitations (deliberate, not bugs)
 

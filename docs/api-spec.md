@@ -115,7 +115,8 @@ reachable; only the schema shape below is guaranteed.
 `gemini_client.py`) — falls back to the deterministic rule-based response if that provider's
 API key is unset or the call fails, so a missing key or provider outage never causes a 4xx/5xx.
 An unrecognized value (anything other than `"solar"`/`"gemini"`) returns **422** (FastAPI's
-standard request-validation error).
+standard request-validation error). This is a per-request user choice, not automatic routing —
+see CLAUDE.md section 9 before changing this (reverted to auto-routing and back twice already).
 
 **Request example**
 
@@ -229,33 +230,51 @@ is set, 30 for the offline mock fallback)
 
 ---
 
-## GET /api/v1/stocks/{ticker}/checklist
+## POST /api/analysis/date
 
-Returns "오늘의 체크리스트" — today's news for the ticker, pre-tagged for the beginner-investor
-checklist UI (`frontend/src/features/article-checklist/`). Backed by real Naver News articles
-in `data/news.json` (see `data/step5_news.py`, M2) when present; otherwise falls back to mock
-checklist items so the endpoint never 500s.
+Newer, separate endpoint (2026-07-22) powering the chart-point popover, the small summary card
+under the chart, and the sidebar "오늘의 체크리스트" panel. Does not touch or replace
+`/api/v1/explanations` above — that one still powers the SOLAR/Gemini toggle and "관련 자료"
+list inside `MarketEventsPanel`. See `app/schemas/stock_analysis.py` for the full Pydantic
+models and CLAUDE.md section 10 for the full design writeup.
 
-**Response schema**
+**Request schema**
+
+```
+{ "ticker": string, "selected_date": "YYYY-MM-DD" }
+```
+
+**Response schema** (abridged — see `app/schemas/stock_analysis.py` for exact field types/enums)
 
 ```
 {
-  "ticker": string,
-  "date": "YYYY-MM-DD",
-  "total_article_count": integer,
-  "items": [{
-    "id": string,
-    "tag": "positive" | "negative" | "earnings" | "caution" | "neutral",
-    "headline": string,
-    "description": string,
-    "source_count": integer,
-    "url": string
-  }]
+  "analysis": {
+    "chart_card": {
+      "selected_date": string, "price_change_text": string, "one_line_summary": string,
+      "quick_facts": [{ "label": string, "value": string }],       // max 2
+      "primary_evidence": { "label": string, "source_id": string } | null
+    },
+    "detail_panel": {
+      "why_it_moved": [{ "title", "description", "status", "evidence_type", "evidence_level",
+                          "source_ids": [string] }],                // max 2
+      "what_to_watch": [{ "title", "description", "signal_type", "source_ids": [string] }],  // max 3
+      "recommended_materials": [{ "source_id", "description",
+                                    "information_to_verify": [string] }],  // max 2, topics max 3
+      "caution": string
+    }
+  },
+  "sources": { "<source_id>": { "source_id", "source_type", "title", "url", "publisher", "published_at" } }
 }
 ```
 
-**Error (404)** — unknown ticker
+Provider is fixed by env var `LLM_PROVIDER` (default `solar`) — no per-request field, no
+user-facing toggle yet (see `app/services/llm/factory.py`). Every LLM-produced field is
+re-validated against the backend-built candidates before being returned (source_ids must exist
+in the input context, `quick_facts`/`what_to_watch` must exactly match a candidate,
+`information_to_verify` must be a subset of that source's `available_topics`) — anything that
+doesn't match is dropped, never trusted as-is. On repeated validation failure or no
+disclosures/news at all for the date, falls back to a deterministic response built directly
+from the backend candidates (no LLM call).
 
-```json
-{ "detail": "Unknown ticker: 999999" }
-```
+**Errors**: same 404 (`Unknown ticker`) / 400 (`No price data for ...`) shape as
+`/api/v1/explanations` above.
