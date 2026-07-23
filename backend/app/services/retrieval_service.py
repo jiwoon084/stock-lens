@@ -19,10 +19,12 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
+import numpy as np
 import requests
 
 from app.core.config import settings
 from app.schemas.explanation import Source
+from app.services import embedding_client
 
 DOCUMENT_URL = "https://opendart.fss.or.kr/api/document.xml"
 EXCERPT_LENGTH = 400
@@ -293,6 +295,64 @@ def _source_date_distance(source: Source, target: date) -> int:
     return abs((date.fromisoformat(source.published_at[:10]) - target).days)
 
 
+# ---- semantic reranking (SOLAR embeddings) --------------------------------------------------
+#
+# Disclosures/news are still fetched and pre-filtered exactly as before (routine-deprioritized,
+# date-window matched). This layer only reorders the resulting candidates by how semantically
+# close their *title* (disclosures) or *title+description* (news) is to the selected date's
+# price movement — using the document body would need one live document.xml fetch per
+# candidate, which is too expensive to do for every candidate just to rank them.
+#
+# If SOLAR_API_KEY is unset or any embedding call fails, _semantic_scores returns None and
+# callers fall back to the original date-only rank_key functions below, unchanged.
+
+_DIRECTION_KO = {"up": "상승", "down": "하락", "flat": "보합"}
+
+
+def _build_movement_query(ticker: str, selected_date: str, direction: str) -> str:
+    return f"{ticker} 종목의 {selected_date} 주가 {_DIRECTION_KO.get(direction, '변동')} 관련 소식"
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    va, vb = np.array(a), np.array(b)
+    denom = np.linalg.norm(va) * np.linalg.norm(vb)
+    return float(np.dot(va, vb) / denom) if denom else 0.0
+
+
+@lru_cache(maxsize=256)
+def _cached_passage_embedding(text: str) -> tuple[float, ...]:
+    return tuple(embedding_client.embed_passage(text))
+
+
+@lru_cache(maxsize=64)
+def _cached_query_embedding(query: str) -> tuple[float, ...]:
+    return tuple(embedding_client.embed_query(query))
+
+
+def _semantic_scores(query: str, texts: tuple[str, ...]) -> tuple[float, ...] | None:
+    """One cosine-similarity score per text in `texts`, or None if embeddings are unavailable."""
+    if not texts:
+        return ()
+    try:
+        query_vec = list(_cached_query_embedding(query))
+    except embedding_client.EmbeddingApiError:
+        return None
+
+    scores = []
+    for text in texts:
+        try:
+            passage_vec = list(_cached_passage_embedding(text))
+        except embedding_client.EmbeddingApiError:
+            scores.append(0.0)
+            continue
+        scores.append(max(0.0, _cosine_similarity(query_vec, passage_vec)))
+    return tuple(scores)
+
+
+def _date_proximity_score(delta_days: int) -> float:
+    return 1.0 / (1.0 + abs(delta_days))
+
+
 def get_related_documents(ticker: str, selected_date: str, direction: str) -> list[Source]:
     disclosures_by_ticker = _load_disclosures_by_ticker()
     news_by_ticker = _load_news_by_ticker()
@@ -319,8 +379,36 @@ def get_related_documents(ticker: str, selected_date: str, direction: str) -> li
         delta = (pub_date - target).days
         return (0 if delta <= 0 else 1, abs(delta))
 
-    ranked_disclosures = sorted(disclosure_entries, key=disclosure_rank_key)
-    ranked_news = sorted(news_entries, key=news_rank_key)
+    query = _build_movement_query(ticker, selected_date, direction)
+    disclosure_semantic = _semantic_scores(query, tuple(e["report_nm"] for e in disclosure_entries))
+    news_semantic = _semantic_scores(
+        query, tuple(f'{a["title"]} {a["description"]}' for a in news_entries)
+    )
+
+    if disclosure_semantic is None:
+        ranked_disclosures = sorted(disclosure_entries, key=disclosure_rank_key)
+    else:
+
+        def disclosure_hybrid_key(pair: tuple[int, dict]) -> tuple[bool, float]:
+            index, entry = pair
+            entry_date = datetime.strptime(entry["rcept_dt"], "%Y%m%d").date()
+            delta = (entry_date - target).days
+            hybrid = 0.5 * _date_proximity_score(delta) + 0.5 * disclosure_semantic[index]
+            return (_is_routine(entry["report_nm"]), -hybrid)
+
+        ranked_disclosures = [e for _, e in sorted(enumerate(disclosure_entries), key=disclosure_hybrid_key)]
+
+    if news_semantic is None:
+        ranked_news = sorted(news_entries, key=news_rank_key)
+    else:
+
+        def news_hybrid_key(pair: tuple[int, dict]) -> float:
+            index, article = pair
+            pub_date = _news_pub_date(article)
+            date_score = _date_proximity_score((pub_date - target).days) if pub_date else 0.0
+            return -(0.5 * date_score + 0.5 * news_semantic[index])
+
+        ranked_news = [a for _, a in sorted(enumerate(news_entries), key=news_hybrid_key)]
 
     # 공시 DISCLOSURE_SLOTS개 + 뉴스 나머지를 기본 배정으로 하되, 한쪽이 모자라면 그만큼 상대에게 넘김.
     disclosure_slots = min(DISCLOSURE_SLOTS, len(ranked_disclosures))

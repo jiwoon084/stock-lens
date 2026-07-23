@@ -78,3 +78,32 @@ flowchart TD
 `explanation_service.explain_movement()` is the only place that calls `market_data_service`,
 `retrieval_service`, and `llm_service` together — routes never call more than one service
 directly, and never contain business logic themselves.
+
+## Stock-analysis pipeline (POST /api/analysis/date)
+
+`stock_analysis_service.analyze_date()` no longer runs this as one procedural function — it
+builds and invokes a LangGraph `StateGraph` (`app/agent/graph.py`) with four sequential nodes
+(`app/agent/nodes.py`, state shape in `app/agent/state.py`):
+
+```mermaid
+flowchart LR
+    A["fetch_market_data"] --> B["retrieve_evidence"] --> C["build_llm_input"] --> D["generate_analysis"]
+```
+
+Each node is a thin wrapper around helpers that already lived in `stock_analysis_service.py`
+(and stay there, unit-tested directly) — the graph adds explicit orchestration, not new
+business rules. `TickerNotFoundError`/`DateNotFoundError` raised inside `fetch_market_data`
+propagate out of `graph.invoke()` and are translated back to `UnknownTickerError`/
+`UnknownDateError` at the `analyze_date()` boundary, so the HTTP-level 404 behavior is
+unchanged.
+
+`retrieve_evidence` calls `retrieval_service.get_related_documents()`, which now ranks
+candidates by a **date + semantic-similarity hybrid score** instead of date proximity alone:
+the selected date's price movement is turned into a short query string, embedded via
+Upstage's `solar-embedding-1-large-query` model, and compared (cosine similarity) against each
+disclosure/news candidate's title embedded via `solar-embedding-1-large-passage`
+(`app/services/embedding_client.py`). This lets a semantically relevant but older disclosure
+outrank a closer-dated but unrelated one — see `backend/tests/test_retrieval_service.py`.
+Routine disclosures (`_is_routine`) are still deprioritized ahead of any ranking. If
+`SOLAR_API_KEY` is unset or the embedding call fails, ranking falls back to the exact original
+date-only order — same fallback philosophy as `market_data_service`/`llm_service`.
