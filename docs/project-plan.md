@@ -122,13 +122,24 @@ feed the analysis, the agreed tiering was:
      its real `[id]` and instructs the model to only cite ids it was actually shown; `llm_service.
      _sanitize_factors()` additionally strips any cited id that doesn't match a real source as a
      backstop, in case a model ignores the instruction.
-   - `backend/app/agent/` still holds an early, untouched LangGraph skeleton
-     (`state.py`/`nodes.py`/`graph.py`, TODO stubs) — not used by the above.
+   - `backend/app/agent/` held an early, untouched LangGraph skeleton until 2026-07-23 — see
+     M3.6 below, it's no longer a stub.
 4b. **M3.5 — separate `POST /api/analysis/date` endpoint (2026-07-22)**: powers a chart-point
     popover, a small summary card under the chart, and the "오늘의 체크리스트" sidebar panel —
     see `docs/api-spec.md` and CLAUDE.md section 10. Has its own provider layer
     (`app/services/llm/`) fixed by env var `LLM_PROVIDER` (no user-facing toggle yet); completely
     independent of the M3 dispatcher above, do not conflate the two when resolving future merges.
+4c. **M3.6 — semantic retrieval + LangGraph pipeline (2026-07-23)**: `retrieval_service.py`
+    reranks candidates by a date-proximity + SOLAR-embedding-similarity hybrid score
+    (`app/services/embedding_client.py`, `solar-embedding-1-large-query`/`-passage`), falling
+    back to the original date-only order when `SOLAR_API_KEY` is unset or a call fails.
+    `stock_analysis_service.analyze_date()` now builds and runs the previously-unused
+    `app/agent/` LangGraph skeleton (`fetch_market_data` → `retrieve_evidence` →
+    `build_llm_input` → `generate_analysis`) instead of one procedural function — each node
+    wraps existing, still-independently-tested helpers, so no business logic moved. See
+    CLAUDE.md section 11 and `docs/architecture.md`. Still open: `explain()`/`analyze()` still
+    call retrieval and the LLM independently (no dedup), and the graph has no branching/retry
+    policy beyond what `_generate_result()` already did.
 5. **M4 — GCP deployment — not started**: complete the one-time setup in `infra/gcp-setup.md`,
    then let `.github/workflows/deploy.yml` run for real. Now also needs `DART_API_KEY` in Secret
    Manager (same pattern as SOLAR/GEMINI) and confirmation that the Cloud Run backend has

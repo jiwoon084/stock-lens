@@ -10,7 +10,6 @@ user-selectable SOLAR/Gemini toggle are untouched.
 
 import json
 import logging
-from datetime import date
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -18,7 +17,6 @@ from pydantic import ValidationError
 from app.schemas.explanation import Source
 from app.schemas.stock import PricePoint
 from app.schemas.stock_analysis import (
-    AllowedWatchItem,
     ChartCard,
     DetailPanel,
     DisclosureContext,
@@ -35,8 +33,6 @@ from app.schemas.stock_analysis import (
     StockAnalysisResult,
     WatchItem,
 )
-from app.rules.watch_item_templates import generate_allowed_watch_items
-from app.services import market_data_service, retrieval_service
 from app.services.llm import factory
 from app.services.llm.base import LLMProviderError
 
@@ -367,50 +363,23 @@ def _generate_result(llm_input: LLMInputContext, provider_name: str | None) -> S
 
 
 def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = None) -> StockAnalysisResponse:
-    stock = market_data_service.get_stock(ticker)
-    if stock is None:
-        raise UnknownTickerError(f"Unknown ticker: {ticker}")
+    # Local import: app.agent.nodes imports this module, so importing the graph at this
+    # module's top level would be circular — see app/agent/graph.py's docstring.
+    from app.agent.graph import get_graph
+    from app.agent.nodes import DateNotFoundError, TickerNotFoundError
 
-    is_today = selected_date == date.today().isoformat()
+    graph = get_graph()
+    try:
+        final_state = graph.invoke({"ticker": ticker, "selected_date": selected_date, "llm_provider": llm_provider})
+    except TickerNotFoundError as exc:
+        raise UnknownTickerError(f"Unknown ticker: {ticker}") from exc
+    except DateNotFoundError as exc:
+        raise UnknownDateError(f"No price data for {ticker} on {selected_date}") from exc
 
-    prices = market_data_service.get_price_series_with_live_today(ticker)
-    index = next((i for i, p in enumerate(prices) if p.time == selected_date), None)
-    if index is None:
-        raise UnknownDateError(f"No price data for {ticker} on {selected_date}")
-
-    point = prices[index]
-    direction = "up" if point.change_percent > 0 else "down" if point.change_percent < 0 else "flat"
-
-    retrieved = retrieval_service.get_related_documents(
-        ticker=ticker, selected_date=selected_date, direction=direction
-    )
-    disclosures = [s for s in retrieved if s.type == "disclosure"]
-    news = [s for s in retrieved if s.type != "disclosure"]
-
-    market_data = _build_market_data_context(prices, index, is_today)
-    disclosure_contexts = [_to_disclosure_context(s) for s in disclosures]
-    news_contexts = [_to_news_context(s) for s in news]
-    allowed_watch_items: list[AllowedWatchItem] = generate_allowed_watch_items(disclosure_contexts, news_contexts)
-
-    llm_input = LLMInputContext(
-        ticker=ticker,
-        company_name=stock.name,
-        selected_date=selected_date,
-        market_data=market_data,
-        quick_fact_candidates=_build_quick_fact_candidates(market_data),
-        disclosures=disclosure_contexts,
-        news=news_contexts,
-        allowed_watch_items=allowed_watch_items,
-    )
-
-    if not disclosure_contexts and not news_contexts:
-        result = _fallback_result(llm_input)
-    else:
-        result = _generate_result(llm_input, llm_provider)
-
-    if is_today:
+    result = final_state["result"]
+    if final_state["is_intraday"]:
         result = result.model_copy(
             update={"detail_panel": result.detail_panel.model_copy(update={"intraday_notice": INTRADAY_NOTICE})}
         )
 
-    return StockAnalysisResponse(analysis=result, sources=_build_sources_map(disclosures, news))
+    return StockAnalysisResponse(analysis=result, sources=_build_sources_map(final_state["disclosures"], final_state["news"]))

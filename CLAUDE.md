@@ -60,18 +60,24 @@ backend/    FastAPI (routes → schemas/services → core/config 3계층)
   app/services/       market_data_service.py(공식 KRX API, 없으면 mock), krx_price_client.py
                       (data.go.kr 금융위원회_주식시세정보, 요청마다 실시간 호출 + 당일 in-process
                       캐시), retrieval_service.py(disclosures.json 실제 DART 공시 + news.json 실제
-                      뉴스를 날짜 근접도로 섞어서 근거로 사용, 실제 본문 발췌 + 루틴성 공시 필터링,
-                      둘 다 없으면 mock), llm_service.py(사용자가 고른 SOLAR/Gemini 중 하나 호출,
+                      뉴스를 날짜 근접도 **+ SOLAR 임베딩 의미 유사도 하이브리드 랭킹**으로 섞어서
+                      근거로 사용 — 아래 11번, 실제 본문 발췌 + 루틴성 공시 필터링, 데이터 둘 다
+                      없으면 mock), embedding_client.py(신규 — 아래 11번, solar-embedding-1-large
+                      query/passage), llm_service.py(사용자가 고른 SOLAR/Gemini 중 하나 호출,
                       키 없거나 실패 시 규칙 기반 폴백 — 아래 9번), solar_client.py/gemini_client.py
                       (각자 REST API 직접 호출), explanation_service.py(위 서비스 조합),
-                      stock_analysis_service.py(신규 — 아래 10번), llm/(신규 — base.py/factory.py/
-                      solar_provider.py/gemini_provider.py, stock_analysis_service 전용 provider
-                      계층. llm_service.py의 라우팅과는 완전히 별개)
-  app/rules/          watch_item_templates.py(신규 — 아래 10번)
-  app/agent/          LangGraph 스켈레톤 (state.py/nodes.py/graph.py, 현재 TODO 스텁, 손 안 댐)
+                      stock_analysis_service.py(아래 10번 — analyze_date()는 이제 절차형 함수가
+                      아니라 app/agent/의 LangGraph를 빌드·실행함, 아래 11번), llm/(base.py/
+                      factory.py/solar_provider.py/gemini_provider.py, stock_analysis_service 전용
+                      provider 계층. llm_service.py의 라우팅과는 완전히 별개)
+  app/rules/          watch_item_templates.py(아래 10번)
+  app/agent/          **더 이상 스켈레톤 아님 — 아래 11번 참고.** state.py/nodes.py/graph.py로
+                      stock-analysis LangGraph(fetch_market_data→retrieve_evidence→
+                      build_llm_input→generate_analysis) 실제 구현함(2026-07-23)
   app/prompts/        explain_movement.txt (기존 LLM 프롬프트 — [id] 인용 강제), 
-                      stock_analysis_system.txt(신규 — 아래 10번)
-  requirements.txt    fastapi, uvicorn, pydantic, pydantic-settings, pytest, httpx, requests
+                      stock_analysis_system.txt(아래 10번)
+  requirements.txt    fastapi, uvicorn, pydantic, pydantic-settings, pytest, httpx, requests,
+                      numpy, langgraph(아래 11번)
                       (openai SDK 없음 — SOLAR/Gemini 둘 다 requests로 직접 REST 호출)
 frontend/   Vite + React + TypeScript (라이트 테마, Koyfin/Perplexity 스타일 대시보드 — 정영준님 작업)
   src/App.tsx                         상단바 + 종목선택/StockHeader + workspace(좌: 차트+주목할만한
@@ -511,6 +517,80 @@ KIS 서버 자체에서 500 Internal Server Error**를 반환함(재현 성공) 
    프론트는 `isIntradayView`를 `ChartMovementPopover`까지 내려서 헤드라인도 "오늘 확인된
    소식"으로 고정(방향 안 물어봄).
 
+⚠️ **위 작업들 이후 origin/main에 있던 eddie 세션의 LangGraph 리팩터와 다시 병합하면서
+(아래 §12), `analyze_date()`의 `is_today`/`intraday_notice` 로직을 `nodes.fetch_market_data`
+쪽으로 옮김** — `AnalysisGraphState`에 `is_intraday: bool` 필드를 추가하고
+`_build_market_data_context(prices, index, is_intraday)`에 실제 값을 넘기도록 수정, `analyze_date()`는
+`final_state["is_intraday"]`를 읽어 `intraday_notice`를 붙이는 것으로 축소함. eddie 세션이 이미
+한 번 겪은 것과 같은 종류의 충돌(그래프 리팩터 vs `get_price_series_with_live_today()` 관련
+후속 커밋)이라, 그때 해결한 것과 같은 원칙(그래프 구조 유지 + 필요한 값만 노드에 반영)으로
+처리함.
+
+## 12. 시맨틱 검색(SOLAR 임베딩) + LangGraph 에이전트 실제 구현 (2026-07-23, eddie 세션)
+
+**배경**: 중간발표 준비 중 "MCP 같은 최신 기술을 접목하고 싶다"는 요청에서 출발했는데, 검토
+결과 MCP는 최종 사용자(초보 투자자)에게 아무 가치가 없고 순수 기술력 어필용이라 우선순위를
+낮추고, 대신 **실제 사용자에게도 이득이 되면서 이미 있던 미완성 조각(위 4번 `app/agent/`
+TODO 스텁)을 채우는 두 가지**를 우선 진행하기로 함:
+1. "RAG"라고 부르면서 실제로는 **날짜 근접도로만** 근거를 고르던 것을 **의미 기반 검색**으로
+   보강.
+2. 방치돼 있던 `app/agent/`(LangGraph) 스켈레톤을 실제로 채워서, `stock_analysis_service`를
+   명시적 그래프로 재구성.
+
+**1) `app/services/embedding_client.py` (신규)** — Upstage SOLAR 임베딩 API
+(`https://api.upstage.ai/v1/solar/embeddings`)를 `solar_client.py`와 같은 스타일로 `requests`
+직접 호출. `solar-embedding-1-large-query`(질의문용)/`solar-embedding-1-large-passage`(문서용)
+두 모델을 구분해서 씀 — 같은 벡터 공간이라 서로 비교 가능. 키 없거나 호출 실패 시
+`EmbeddingApiError`. 테스트: `backend/tests/test_embedding_client.py`.
+
+**2) `retrieval_service.py` 하이브리드 랭킹** — `get_related_documents()`는 이제 선택 날짜의
+등락 방향으로 짧은 질의문(`_build_movement_query`)을 만들어 임베딩하고, 공시 제목/뉴스
+제목+요약을 임베딩해 코사인 유사도를 구한 뒤 `0.5×날짜근접도 + 0.5×의미유사도`로 재랭킹함
+(본문 전체가 아니라 **제목만** 임베딩 — 후보 전체에 대해 DART 본문 실시간 조회를 다 하면
+비용이 너무 커서, 실제 본문 발췌는 여전히 최종 선택된 상위 몇 건에 대해서만 지연 조회함).
+루틴성 공시 후순위 배치(`_is_routine`)는 그대로 최우선 유지. `SOLAR_API_KEY`가 없거나
+임베딩 호출이 실패하면 **기존 날짜순 정렬 함수(`disclosure_rank_key`/`news_rank_key`)를
+그대로 호출** — 즉 키 없는 환경(팀원/CI)에서는 이전과 100% 동일하게 동작함. 검증:
+`backend/tests/test_retrieval_service.py`가 "날짜는 가깝지만 무관한 공시 3건 + 날짜는
+멀지만 의미상 관련 있는 공시 1건" 픽스처로, 임베딩 있을 때 후자가 실제로 상위 3슬롯 안에
+들어오고, 임베딩 없을 때는 기존과 동일하게 날짜순 상위 3건이 나오는 것을 둘 다 확인함.
+이 세션이 merge하기 전 origin/main에 이미 올라와 있던 `_naive_summary_lines`/
+`summary_lines`(위 11번, 근거 3줄 요약 기능)는 완전히 다른 함수를 건드리는 변경이라
+merge가 자동으로 성공했고, 서로 간섭하지 않음.
+
+**3) `app/agent/` LangGraph 실제 구현** — `state.py`(`AnalysisGraphState` TypedDict,
+기존에 있던 "종목 Q&A 챗봇"용 스켈레톤 상태는 이 기능과 안 맞아서 새로 정의), `nodes.py`
+(`fetch_market_data`→`retrieve_evidence`→`build_llm_input`→`generate_analysis` 4개 노드,
+전부 `stock_analysis_service.py`에 원래 있던 private 헬퍼(`_build_market_data_context`,
+`_to_disclosure_context`, `_sanitize_result`, `_fallback_result` 등)를 그대로 감싸는
+wrapper — 새 비즈니스 로직 없음, 그래서 그 헬퍼들을 직접 테스트하는 기존
+`test_stock_analysis_service.py`가 전혀 안 바뀌어도 됨), `graph.py`(`StateGraph` 조립,
+모듈 전역에 컴파일된 그래프 캐시). `stock_analysis_service.analyze_date()`는 이제 이 그래프를
+`graph.invoke()`로 실행하고 결과를 꺼내는 얇은 함수로 축소됨 — `nodes.py`가
+`stock_analysis_service`를 import하고 `stock_analysis_service.analyze_date()`는 함수 본문
+안에서만(모듈 최상단 아님) `app.agent.graph`를 import하는 방식으로 순환 임포트를 피함
+(자세한 이유는 `nodes.py`/`graph.py` 파일 안 docstring 참고).
+⚠️ **merge 충돌 실제로 발생·해결함**: origin/main이 이 세션과 별개로 `analyze_date()`의
+시세 조회를 `get_price_series()` → `get_price_series_with_live_today()`(위 11번, "오늘"
+탭 지원)로 바꿔뒀는데, 이 세션은 그 함수 전체를 그래프 호출로 통째로 갈아엎어서 정면 충돌.
+해결: 그래프 구조(이 세션 것)를 유지하되, `nodes.fetch_market_data`가 `get_price_series`
+대신 `get_price_series_with_live_today`를 호출하도록 반영 — 두 세션의 의도를 합침. **다음에
+`app/agent/nodes.py`를 건드릴 때, "오늘" 탭 분석이 여전히 되는지(시세가 없을 때
+`UnknownDateError`가 아니라 실시간 시세로 합성돼야 함) 반드시 확인할 것.**
+
+**검증**: 이 세션의 변경만으로는 백엔드 테스트 62개(53개+임베딩/리트리벌 신규 9개) 전부 통과,
+회귀 없음. 이후 origin/main(11번, KIS 실시간 시세 작업)과 병합해 최종 상태에서도 전체 테스트가
+통과하는 것까지 확인함(정확한 총 개수는 이 커밋의 실제 pytest 출력 참고 — 양쪽 신규 테스트가
+합쳐져 63개보다 많음).
+
+**의도적으로 안 한 것**:
+- `explain()`(`/api/v1/explanations`)의 `retrieval_service` 호출도 같은 하이브리드 랭킹의
+  덕을 자동으로 봄(같은 함수를 공유하므로) — 이 엔드포인트 자체의 로직은 안 건드림.
+- LangGraph 도입 자체가 답변 품질을 올리진 않음 — 품질 개선은 순전히 임베딩 하이브리드
+  랭킹에서 나옴. LangGraph는 오케스트레이션을 명시적 구조로 만든 것뿐(관측성/확장성 목적).
+- 그래프에 조건 분기/재시도 정책은 아직 안 넣음 — `generate_analysis` 노드 내부의 재시도
+  (`MAX_RETRIES=1`)는 기존 `_generate_result` 로직 그대로 재사용.
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
@@ -582,4 +662,6 @@ Docker+GCE)의 인프라 패턴을 그대로 재사용하기로 확정함:
    하지 않는 쪽을 추천.
 8. `/api/analysis/date`(10번)의 남은 TODO: Gemini provider 실제 연결, 사용자 선택 토글 여부
    결정, market_comparison_text용 KOSPI 지수 데이터 소스 확보, 그리고 `explain()`/`analyze()`
-   중복 호출 통합 검토.
+   중복 호출 통합 검토. ~~`app/agent/` LangGraph 스켈레톤 채우기~~ → **완료**(11번 참고,
+   2026-07-23) — 단, `explain()`/`analyze()` 중복 호출 통합은 여전히 안 함(11번도 같은 한계
+   명시).
