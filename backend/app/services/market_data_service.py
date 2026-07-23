@@ -1,6 +1,6 @@
 import logging
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from app.core.config import settings
 from app.schemas.stock import IntradayPoint, LivePrice, PricePoint, Stock
@@ -91,20 +91,39 @@ def get_price_series_with_live_today(ticker: str) -> list[PricePoint]:
     return [*prices, synthetic]
 
 
+# ticker -> (fetched_at, price). KIS's 모의투자 quote endpoint intermittently 500s under
+# concurrent load (reproduced empirically: 3 of 5 simultaneous calls failed) — a single "오늘"
+# chart click alone fires two independent callers (explain() and analyze()) that each want this
+# same value, on top of the frontend's own 10s live-price poll and 20s intraday poll potentially
+# landing in the same instant. A few-second cache means those near-simultaneous callers share one
+# real KIS call instead of racing each other into a collision.
+_live_price_cache: dict[str, tuple[datetime, LivePrice]] = {}
+_LIVE_PRICE_CACHE_TTL = timedelta(seconds=3)
+
+
 def get_live_price(ticker: str) -> LivePrice | None:
     """Near-real-time current price during market hours, via KIS Developers (demo account).
 
     Returns None (not a mock) when unavailable — a fabricated "live" price would violate the
-    project's "출처 기반 신뢰성" principle worse than just hiding the live badge.
+    project's "출처 기반 신뢰성" principle worse than just hiding the live badge. On a fresh KIS
+    failure, falls back to the last known-good cached value (however recent) instead — a few
+    seconds stale is still a real, sourced price, unlike inventing one.
     """
     if not settings.kis_app_key or not settings.kis_app_secret:
         return None
 
+    cached = _live_price_cache.get(ticker)
+    if cached is not None and datetime.now() - cached[0] < _LIVE_PRICE_CACHE_TTL:
+        return cached[1]
+
     try:
-        return kis_client.fetch_live_price(ticker)
+        price = kis_client.fetch_live_price(ticker)
     except kis_client.KisApiError as exc:
         logger.warning("KIS live price fetch failed for %s: %s", ticker, exc)
-        return None
+        return cached[1] if cached is not None else None
+
+    _live_price_cache[ticker] = (datetime.now(), price)
+    return price
 
 
 # ticker -> {"date": "YYYY-MM-DD", "points": {iso_time: price}} — accumulates each poll's ~30-row

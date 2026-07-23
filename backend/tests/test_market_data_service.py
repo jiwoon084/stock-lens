@@ -3,7 +3,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.core.config import settings
-from app.services import krx_price_client, market_data_service
+from app.schemas.stock import LivePrice
+from app.services import kis_client, krx_price_client, market_data_service
 
 
 @pytest.fixture(autouse=True)
@@ -122,3 +123,65 @@ def test_market_data_service_uses_real_client_when_key_and_data_present():
 
     assert [p.time for p in result] == ["2026-07-15"]
     assert result != market_data_service._generate_mock_price_series(ticker)
+
+
+@pytest.fixture(autouse=True)
+def _reset_kis_live_price_state():
+    original_key = settings.kis_app_key
+    original_secret = settings.kis_app_secret
+    settings.kis_app_key = ""
+    settings.kis_app_secret = ""
+    market_data_service._live_price_cache.clear()
+    yield
+    settings.kis_app_key = original_key
+    settings.kis_app_secret = original_secret
+    market_data_service._live_price_cache.clear()
+
+
+def _sample_live_price(price: float = 260_000.0) -> LivePrice:
+    return LivePrice(
+        price=price, change=1000.0, change_percent=0.5, direction="up", open=259000.0, high=261000.0, low=258000.0,
+        volume=1_000_000,
+    )
+
+
+def test_get_live_price_caches_near_simultaneous_calls():
+    settings.kis_app_key = "test-key"
+    settings.kis_app_secret = "test-secret"
+
+    with patch.object(kis_client, "fetch_live_price", return_value=_sample_live_price()) as mock_fetch:
+        first = market_data_service.get_live_price("005930")
+        second = market_data_service.get_live_price("005930")
+
+    mock_fetch.assert_called_once()  # second call reused the cached value instead of re-hitting KIS
+    assert first == second
+
+
+def test_get_live_price_falls_back_to_stale_cache_on_kis_failure():
+    settings.kis_app_key = "test-key"
+    settings.kis_app_secret = "test-secret"
+    good_price = _sample_live_price()
+
+    with patch.object(kis_client, "fetch_live_price", return_value=good_price):
+        market_data_service.get_live_price("005930")
+
+    # Force the cache to look expired so the next call actually re-hits KIS (and fails).
+    market_data_service._live_price_cache["005930"] = (
+        market_data_service.datetime.now() - market_data_service._LIVE_PRICE_CACHE_TTL,
+        good_price,
+    )
+
+    with patch.object(kis_client, "fetch_live_price", side_effect=kis_client.KisApiError("500 boom")):
+        result = market_data_service.get_live_price("005930")
+
+    assert result == good_price  # stale-but-real beats no price at all
+
+
+def test_get_live_price_returns_none_without_any_cache_on_first_failure():
+    settings.kis_app_key = "test-key"
+    settings.kis_app_secret = "test-secret"
+
+    with patch.object(kis_client, "fetch_live_price", side_effect=kis_client.KisApiError("500 boom")):
+        result = market_data_service.get_live_price("005930")
+
+    assert result is None
