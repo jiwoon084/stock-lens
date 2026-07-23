@@ -13,6 +13,7 @@ interface ChartMovementPopoverProps {
   containerWidth: number;
   resetKey: string;
   changePercent: number | null;
+  intradayNotice: string | null;
 }
 
 function movementTitle(changePercent: number | null): string {
@@ -28,6 +29,7 @@ export function ChartMovementPopover({
   containerWidth,
   resetKey,
   changePercent,
+  intradayNotice,
 }: ChartMovementPopoverProps) {
   const [dismissed, setDismissed] = useState(false);
 
@@ -67,7 +69,9 @@ export function ChartMovementPopover({
 
       {status === "error" && <p className="empty-state">{error ?? "분석 요청이 실패했습니다."}</p>}
 
-      {status === "success" && <MovementSection title={movementTitle(changePercent)} items={items} />}
+      {status === "success" && (
+        <MovementSection title={movementTitle(changePercent)} items={items} intradayNotice={intradayNotice} />
+      )}
     </div>
   );
 }

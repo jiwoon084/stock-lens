@@ -23,6 +23,8 @@ interface PriceChartProps {
 type DailySeries = ISeriesApi<"Candlestick"> | ISeriesApi<"Area">;
 
 const WON_PRICE_FORMAT = { type: "price" as const, precision: 0, minMove: 1 };
+const UP_COLOR = "#d92b2b";
+const DOWN_COLOR = "#1c64f2";
 
 // lightweight-charts spaces bars uniformly by array index, not by real elapsed time — mixing
 // day-granularity history with minute-granularity intraday ticks on one series would make 30
@@ -66,11 +68,11 @@ function createDailySeries(chart: IChartApi, chartType: ChartType): DailySeries 
     });
   }
   return chart.addCandlestickSeries({
-    upColor: "#d92b2b",
-    downColor: "#1c64f2",
+    upColor: UP_COLOR,
+    downColor: DOWN_COLOR,
     borderVisible: false,
-    wickUpColor: "#d92b2b",
-    wickDownColor: "#1c64f2",
+    wickUpColor: UP_COLOR,
+    wickDownColor: DOWN_COLOR,
     priceLineVisible: false,
     priceFormat: WON_PRICE_FORMAT,
   });
@@ -92,14 +94,27 @@ function applyDailyData(series: DailySeries, chartType: ChartType, prices: Price
     (series as ISeriesApi<"Area">).setData(prices.map((point) => ({ time: point.time, value: point.close })));
     return;
   }
+  // lightweight-charts colors each candle by comparing that bar's own open vs close by default —
+  // a different metric from change_percent (close vs the PREVIOUS day's close), which is what
+  // drives the "왜 올라갔나요/내려갔나요" headline and every displayed 등락률. The two can
+  // disagree (e.g. a gap-up day that drifts down after the open still nets positive vs
+  // yesterday), showing a blue/down-colored candle under an "왜 올라갔나요?" headline. Passing
+  // an explicit per-point color keyed off change_percent keeps the candle and the headline
+  // always driven by the same number.
   (series as ISeriesApi<"Candlestick">).setData(
-    prices.map((point) => ({
-      time: point.time,
-      open: point.open,
-      high: point.high,
-      low: point.low,
-      close: point.close,
-    })),
+    prices.map((point) => {
+      const color = point.change_percent < 0 ? DOWN_COLOR : UP_COLOR;
+      return {
+        time: point.time,
+        open: point.open,
+        high: point.high,
+        low: point.low,
+        close: point.close,
+        color,
+        wickColor: color,
+        borderColor: color,
+      };
+    }),
   );
 }
 

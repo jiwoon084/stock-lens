@@ -135,6 +135,9 @@ class DetailPanel(BaseModel):
     what_to_watch: list[WatchItem] = Field(default_factory=list, max_length=3)
     recommended_materials: list[RecommendedMaterial] = Field(default_factory=list, max_length=2)
     caution: str
+    # "오늘"(장중) 분석에만 채워짐 — why_it_moved의 신뢰성에 직접 영향을 주는 정보라, 일반
+    # caution(사이드바용)과 분리해 프론트가 이날 왜 움직였나요 팝오버 쪽에 붙일 수 있게 함.
+    intraday_notice: str | None = None
 
 
 class StockAnalysisResult(BaseModel):

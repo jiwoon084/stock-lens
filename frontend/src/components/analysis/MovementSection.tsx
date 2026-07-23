@@ -1,3 +1,4 @@
+import { AnalysisCaution } from "./AnalysisCaution";
 import type { MovementItem, MovementStatus } from "../../types/stockAnalysis";
 
 const STATUS_LABEL: Record<MovementStatus, string> = {
@@ -16,12 +17,14 @@ const EVIDENCE_TYPE_LABEL: Record<MovementItem["evidence_type"], string> = {
 interface MovementSectionProps {
   title: string;
   items: MovementItem[];
+  intradayNotice?: string | null;
 }
 
-export function MovementSection({ title, items }: MovementSectionProps) {
+export function MovementSection({ title, items, intradayNotice }: MovementSectionProps) {
   return (
     <section className="analysis-section">
       <h4 className="analysis-section__title">{title}</h4>
+      {intradayNotice && <AnalysisCaution caution={intradayNotice} />}
 
       {items.length === 0 ? (
         <p className="empty-state">확인된 배경 정보가 아직 충분하지 않아요.</p>

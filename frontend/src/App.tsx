@@ -169,6 +169,7 @@ export default function App() {
                     containerWidth={chartWidth}
                     resetKey={selectedIntradayIso ?? selectedPoint?.time ?? ""}
                     changePercent={selectedPoint?.change_percent ?? null}
+                    intradayNotice={analysisData?.analysis.detail_panel.intraday_notice ?? null}
                   />
                 </div>
                 <SelectedPointInfo point={selectedPoint} />

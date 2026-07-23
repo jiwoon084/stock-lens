@@ -54,6 +54,7 @@ export interface DetailPanel {
   what_to_watch: WatchItem[];
   recommended_materials: RecommendedMaterial[];
   caution: string;
+  intraday_notice: string | null;
 }
 
 export interface StockAnalysis {
