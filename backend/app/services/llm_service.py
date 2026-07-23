@@ -68,6 +68,22 @@ def _sanitize_factors(factors: list[Factor], sources: list[Source]) -> list[Fact
     ]
 
 
+def _sanitize_source_summaries(raw_summaries: list, sources: list[Source]) -> dict[str, list[str]]:
+    """Keep only summaries for ids we actually retrieved, cap to 3 non-empty lines each — same
+    hallucination guard as `_sanitize_factors`, applied to the per-source summary lines.
+    """
+    known_ids = {source.id for source in sources}
+    result: dict[str, list[str]] = {}
+    for item in raw_summaries or []:
+        source_id = item.get("source_id")
+        if source_id not in known_ids:
+            continue
+        lines = [str(line).strip() for line in item.get("lines") or [] if str(line).strip()]
+        if lines:
+            result[source_id] = lines[:3]
+    return result
+
+
 def generate_movement_explanation(
     ticker: str,
     selected_date: str,
@@ -87,6 +103,7 @@ def generate_movement_explanation(
             prompt = _build_prompt(ticker, selected_date, price, change_percent, volume_change_percent, sources)
             result = client.generate_movement_explanation(prompt)
             result["factors"] = _sanitize_factors(result["factors"], sources)
+            result["source_summaries"] = _sanitize_source_summaries(result.get("source_summaries"), sources)
             return result
         except error_cls as exc:
             logger.warning(
@@ -110,6 +127,7 @@ def _no_sources_response(selected_date: str) -> dict:
         "confidence": "low",
         "factors": [],
         "limitations": ["관련 공시·뉴스 검색 결과가 없어 요인을 도출할 수 없습니다."],
+        "source_summaries": {},
     }
 
 
@@ -153,4 +171,5 @@ def _rule_based_response(
         "confidence": confidence,
         "factors": factors,
         "limitations": limitations,
+        "source_summaries": {},
     }

@@ -15,7 +15,7 @@ def explain_movement(request: MovementExplanationRequest) -> MovementExplanation
     if stock is None:
         raise UnknownTickerError(f"Unknown ticker: {request.ticker}")
 
-    prices = market_data_service.get_price_series(request.ticker)
+    prices = market_data_service.get_price_series_with_live_today(request.ticker)
     point = next((p for p in prices if p.time == request.selected_date), None)
     if point is None:
         raise UnknownDateError(f"No price data for {request.ticker} on {request.selected_date}")
@@ -38,6 +38,12 @@ def explain_movement(request: MovementExplanationRequest) -> MovementExplanation
         sources=sources,
         provider=request.llm_provider,
     )
+
+    source_summaries = analysis.get("source_summaries", {})
+    for source in sources:
+        lines = source_summaries.get(source.id)
+        if lines:
+            source.summary_lines = lines
 
     return MovementExplanationResponse(
         ticker=request.ticker,

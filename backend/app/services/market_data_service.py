@@ -1,10 +1,10 @@
 import logging
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from app.core.config import settings
-from app.schemas.stock import PricePoint, Stock
-from app.services import krx_price_client
+from app.schemas.stock import IntradayPoint, LivePrice, PricePoint, Stock
+from app.services import kis_client, krx_price_client
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,105 @@ def get_price_series(ticker: str) -> list[PricePoint]:
             logger.warning("KRX price fetch failed for %s, falling back to mock: %s", ticker, exc)
 
     return _generate_mock_price_series(ticker)
+
+
+def get_price_series_with_live_today(ticker: str) -> list[PricePoint]:
+    """Same as get_price_series(), but appends a synthesized "today" row from the live KIS quote
+    when today isn't in the daily series yet (KRX's official EOD feed lags a day). Lets movement
+    analysis (`explanation_service.py`, `stock_analysis_service.py`) work for "오늘" without
+    waiting for the real daily bar. Never used for the chart itself — PriceChart.tsx's dedicated
+    intraday view exists specifically to avoid mixing daily and intraday granularity on one axis.
+    """
+    prices = get_price_series(ticker)
+    today = date.today().isoformat()
+    if prices and prices[-1].time == today:
+        return prices
+
+    live = get_live_price(ticker)
+    if live is None:
+        return prices
+
+    synthetic = PricePoint(
+        time=today,
+        open=live.open,
+        high=live.high,
+        low=live.low,
+        close=live.price,
+        volume=live.volume,
+        change_percent=live.change_percent,
+        # 장 마감 전이라 어제와 "같은 시각 기준" 거래량을 비교할 신뢰할 만한 기준이 없어 0으로 둠.
+        volume_change_percent=0.0,
+    )
+    return [*prices, synthetic]
+
+
+# ticker -> (fetched_at, price). KIS's 모의투자 quote endpoint intermittently 500s under
+# concurrent load (reproduced empirically: 3 of 5 simultaneous calls failed) — a single "오늘"
+# chart click alone fires two independent callers (explain() and analyze()) that each want this
+# same value, on top of the frontend's own 10s live-price poll and 20s intraday poll potentially
+# landing in the same instant. A few-second cache means those near-simultaneous callers share one
+# real KIS call instead of racing each other into a collision.
+_live_price_cache: dict[str, tuple[datetime, LivePrice]] = {}
+_LIVE_PRICE_CACHE_TTL = timedelta(seconds=3)
+
+
+def get_live_price(ticker: str) -> LivePrice | None:
+    """Near-real-time current price during market hours, via KIS Developers (demo account).
+
+    Returns None (not a mock) when unavailable — a fabricated "live" price would violate the
+    project's "출처 기반 신뢰성" principle worse than just hiding the live badge. On a fresh KIS
+    failure, falls back to the last known-good cached value (however recent) instead — a few
+    seconds stale is still a real, sourced price, unlike inventing one.
+    """
+    if not settings.kis_app_key or not settings.kis_app_secret:
+        return None
+
+    cached = _live_price_cache.get(ticker)
+    if cached is not None and datetime.now() - cached[0] < _LIVE_PRICE_CACHE_TTL:
+        return cached[1]
+
+    try:
+        price = kis_client.fetch_live_price(ticker)
+    except kis_client.KisApiError as exc:
+        logger.warning("KIS live price fetch failed for %s: %s", ticker, exc)
+        return cached[1] if cached is not None else None
+
+    _live_price_cache[ticker] = (datetime.now(), price)
+    return price
+
+
+# ticker -> {"date": "YYYY-MM-DD", "points": {iso_time: price}} — accumulates each poll's ~30-row
+# chunk into a growing full-day series (resets when the calendar date rolls over). A single KIS
+# call only returns the most recent ~30 minutes (no pagination implemented), so on a cold start
+# only that much history shows up; it fills in as polling continues through the session.
+_intraday_cache: dict[str, dict] = {}
+
+
+def get_intraday_prices(ticker: str) -> list[IntradayPoint]:
+    """Today's near-real-time minute-by-minute prices for the continuous "today" chart segment.
+
+    Returns an empty list (not a mock) when KIS isn't configured or the call fails — same
+    "no fabricated real-time data" principle as get_live_price().
+    """
+    if not settings.kis_app_key or not settings.kis_app_secret:
+        return []
+
+    try:
+        fresh_points = kis_client.fetch_intraday_minute_prices(ticker)
+    except kis_client.KisApiError as exc:
+        logger.warning("KIS intraday fetch failed for %s: %s", ticker, exc)
+        fresh_points = []
+
+    today = date.today().isoformat()
+    cache_entry = _intraday_cache.get(ticker)
+    if cache_entry is None or cache_entry["date"] != today:
+        cache_entry = {"date": today, "points": {}}
+        _intraday_cache[ticker] = cache_entry
+
+    for point in fresh_points:
+        cache_entry["points"][point.time] = point.price
+
+    return [IntradayPoint(time=time, price=price) for time, price in sorted(cache_entry["points"].items())]
 
 
 def _generate_mock_price_series(ticker: str) -> list[PricePoint]:

@@ -34,7 +34,10 @@ def fetch_market_data(state: AnalysisGraphState) -> dict:
     if stock is None:
         raise TickerNotFoundError(ticker)
 
-    prices = market_data_service.get_price_series(ticker)
+    # get_price_series_with_live_today (not plain get_price_series): "오늘" is never in the
+    # official daily series yet (KRX EOD lags a day) — this synthesizes today's row from the
+    # live KIS quote so analysis works from the intraday tab too. See market_data_service.py.
+    prices = market_data_service.get_price_series_with_live_today(ticker)
     index = next((i for i, p in enumerate(prices) if p.time == selected_date), None)
     if index is None:
         raise DateNotFoundError(selected_date)

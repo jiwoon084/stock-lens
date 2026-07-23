@@ -38,8 +38,20 @@ _RESPONSE_SCHEMA = {
             },
         },
         "limitations": {"type": "array", "items": {"type": "string"}},
+        "source_summaries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source_id": {"type": "string"},
+                    "lines": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["source_id", "lines"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["headline", "summary", "confidence", "factors", "limitations"],
+    "required": ["headline", "summary", "confidence", "factors", "limitations", "source_summaries"],
     "additionalProperties": False,
 }
 
@@ -83,6 +95,7 @@ def generate_movement_explanation(prompt: str) -> dict:
             "confidence": parsed["confidence"],
             "factors": [Factor(**factor) for factor in parsed["factors"]],
             "limitations": parsed["limitations"],
+            "source_summaries": parsed["source_summaries"],
         }
     except (KeyError, TypeError) as exc:
         raise SolarApiError(f"Unexpected SOLAR response shape: {exc}") from exc

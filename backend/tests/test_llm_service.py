@@ -156,6 +156,27 @@ def test_falls_back_to_rule_based_when_gemini_raises():
     assert result["factors"][0].title == sources[0].title
 
 
+def test_sanitizes_source_summaries_to_known_ids():
+    settings.solar_api_key = "test-key"
+    sources = [_make_source(source_id="source-1")]
+    solar_result = {
+        "headline": "h",
+        "summary": "s",
+        "confidence": "medium",
+        "factors": [],
+        "limitations": [],
+        "source_summaries": [
+            {"source_id": "source-1", "lines": ["첫 줄이에요.", "둘째 줄이에요.", "", "  "]},
+            {"source_id": "hallucinated-id", "lines": ["보이면 안 되는 줄"]},
+        ],
+    }
+
+    with patch.object(solar_client, "generate_movement_explanation", return_value=solar_result):
+        result = _call(sources)
+
+    assert result["source_summaries"] == {"source-1": ["첫 줄이에요.", "둘째 줄이에요."]}
+
+
 def test_solar_and_gemini_do_not_cross_call_each_other():
     settings.solar_api_key = "test-key"
     sources = [_make_source()]

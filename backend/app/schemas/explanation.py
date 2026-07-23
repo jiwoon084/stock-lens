@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MovementExplanationRequest(BaseModel):
@@ -25,6 +25,11 @@ class Source(BaseModel):
     published_at: str
     url: str
     excerpt: str
+    # Short (<=3 line) plain-language summary of `excerpt` for card display. Always populated —
+    # retrieval_service seeds a naive line-split as a deterministic default, and
+    # explanation_service overwrites it with the LLM's version when a provider call succeeds
+    # (same "deterministic fallback, LLM enhances when available" pattern as the rest of the app).
+    summary_lines: list[str] = Field(default_factory=list)
 
 
 class MovementExplanationResponse(BaseModel):

@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     dart_api_key: str = ""
     krx_api_key: str = ""
 
+    # KIS Developers (한국투자증권 Open API) 모의투자(demo) 계좌 — 장중 근실시간 현재가 조회용
+    kis_app_key: str = ""
+    kis_app_secret: str = ""
+    kis_account_no: str = ""
+
     # Default provider for POST /api/analysis/date (app/services/llm/factory.py) — "solar" or
     # "gemini" (gemini_provider.py is interface-only for now, see its docstring). Unrelated to
     # the older /api/v1/explanations feature's user-selectable llm_provider request field.

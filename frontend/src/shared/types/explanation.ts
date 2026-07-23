@@ -24,6 +24,7 @@ export interface Source {
   published_at: string;
   url: string;
   excerpt: string;
+  summary_lines: string[];
 }
 
 export type MovementDirection = "up" | "down" | "flat";

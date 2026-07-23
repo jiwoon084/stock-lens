@@ -37,6 +37,7 @@ _VALID_PAYLOAD = {
         }
     ],
     "limitations": ["공시만으로 인과관계를 확정할 수 없습니다."],
+    "source_summaries": [{"source_id": "source-1", "lines": ["실적 전망치를 상회할 것이라는 기대감이에요."]}],
 }
 
 
