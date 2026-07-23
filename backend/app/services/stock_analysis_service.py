@@ -82,7 +82,7 @@ def _volume_ratio_20d(prices: list[PricePoint], index: int) -> float | None:
     return prices[index].volume / avg_volume
 
 
-def _build_market_data_context(prices: list[PricePoint], index: int) -> MarketDataContext:
+def _build_market_data_context(prices: list[PricePoint], index: int, is_intraday: bool = False) -> MarketDataContext:
     point = prices[index]
     ratio = _volume_ratio_20d(prices, index)
     return MarketDataContext(
@@ -92,6 +92,7 @@ def _build_market_data_context(prices: list[PricePoint], index: int) -> MarketDa
         change_percent=point.change_percent,
         volume=point.volume,
         volume_ratio_20d=ratio,
+        is_intraday=is_intraday,
         volume_comparison_text=f"평소의 {ratio:.1f}배" if ratio is not None else None,
     )
 
@@ -370,6 +371,8 @@ def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = Non
     if stock is None:
         raise UnknownTickerError(f"Unknown ticker: {ticker}")
 
+    is_today = selected_date == date.today().isoformat()
+
     prices = market_data_service.get_price_series_with_live_today(ticker)
     index = next((i for i, p in enumerate(prices) if p.time == selected_date), None)
     if index is None:
@@ -384,7 +387,7 @@ def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = Non
     disclosures = [s for s in retrieved if s.type == "disclosure"]
     news = [s for s in retrieved if s.type != "disclosure"]
 
-    market_data = _build_market_data_context(prices, index)
+    market_data = _build_market_data_context(prices, index, is_today)
     disclosure_contexts = [_to_disclosure_context(s) for s in disclosures]
     news_contexts = [_to_news_context(s) for s in news]
     allowed_watch_items: list[AllowedWatchItem] = generate_allowed_watch_items(disclosure_contexts, news_contexts)
@@ -405,7 +408,7 @@ def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = Non
     else:
         result = _generate_result(llm_input, llm_provider)
 
-    if selected_date == date.today().isoformat():
+    if is_today:
         result = result.model_copy(
             update={"detail_panel": result.detail_panel.model_copy(update={"intraday_notice": INTRADAY_NOTICE})}
         )

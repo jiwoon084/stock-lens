@@ -14,6 +14,7 @@ interface ChartMovementPopoverProps {
   resetKey: string;
   priceChangeText: string | null;
   intradayNotice: string | null;
+  isIntradayView: boolean;
 }
 
 // Derived from the analysis response's own chart_card.price_change_text, NOT from
@@ -22,7 +23,12 @@ interface ChartMovementPopoverProps {
 // when it built these same factors. Two separately-polled reads of a number that's still moving
 // will occasionally disagree in sign; reading the direction back out of the same response that
 // produced the factors guarantees the headline and the content always agree.
-function movementTitle(priceChangeText: string | null): string {
+//
+// "오늘"(isIntradayView)에는 방향(상승/하락) 자체를 아예 묻지 않는다 — 장이 안 끝나 등락이
+// 확정되지 않은 값으로 "왜"를 주장하면 근거 내용의 방향성과 계속 어긋날 위험이 있어서, 백엔드도
+// 이 경우 방향 판단 없이 사실만 전달하도록 바뀜(stock_analysis_system.txt의 is_intraday 분기).
+function movementTitle(priceChangeText: string | null, isIntradayView: boolean): string {
+  if (isIntradayView) return "오늘 확인된 소식";
   if (!priceChangeText) return "이날 왜 움직였나요?";
   if (priceChangeText.startsWith("-")) return "이날 왜 내려갔나요?";
   if (priceChangeText.startsWith("+")) return "이날 왜 올라갔나요?";
@@ -38,6 +44,7 @@ export function ChartMovementPopover({
   resetKey,
   priceChangeText,
   intradayNotice,
+  isIntradayView,
 }: ChartMovementPopoverProps) {
   const [dismissed, setDismissed] = useState(false);
 
@@ -78,7 +85,11 @@ export function ChartMovementPopover({
       {status === "error" && <p className="empty-state">{error ?? "분석 요청이 실패했습니다."}</p>}
 
       {status === "success" && (
-        <MovementSection title={movementTitle(priceChangeText)} items={items} intradayNotice={intradayNotice} />
+        <MovementSection
+          title={movementTitle(priceChangeText, isIntradayView)}
+          items={items}
+          intradayNotice={intradayNotice}
+        />
       )}
     </div>
   );

@@ -169,6 +169,7 @@ export default function App() {
                     containerWidth={chartWidth}
                     resetKey={selectedIntradayIso ?? selectedPoint?.time ?? ""}
                     priceChangeText={analysisData?.analysis.chart_card.price_change_text ?? null}
+                    isIntradayView={isIntradayView}
                     intradayNotice={analysisData?.analysis.detail_panel.intraday_notice ?? null}
                   />
                 </div>

@@ -47,6 +47,9 @@ class MarketDataContext(BaseModel):
     benchmark_name: str | None = None
     benchmark_change_text: str | None = None
     market_comparison_text: str | None = None
+    # 장이 아직 끝나지 않은 "오늘"인지 — true면 등락 방향이 확정되지 않았으므로 why_it_moved가
+    # 원인 주장 대신 중립적 사실 나열로 바뀜(프롬프트 참고).
+    is_intraday: bool = False
 
 
 class DisclosureContext(BaseModel):
