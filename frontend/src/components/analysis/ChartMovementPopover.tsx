@@ -12,13 +12,21 @@ interface ChartMovementPopoverProps {
   coordinate: ChartCoordinate | null;
   containerWidth: number;
   resetKey: string;
-  changePercent: number | null;
+  priceChangeText: string | null;
   intradayNotice: string | null;
 }
 
-function movementTitle(changePercent: number | null): string {
-  if (!changePercent) return "이날 왜 움직였나요?";
-  return changePercent > 0 ? "이날 왜 올라갔나요?" : "이날 왜 내려갔나요?";
+// Derived from the analysis response's own chart_card.price_change_text, NOT from
+// selectedPoint.change_percent — for "오늘" that number comes from the frontend's independent
+// useLivePrice poll, a different snapshot in time than whatever live quote the backend fetched
+// when it built these same factors. Two separately-polled reads of a number that's still moving
+// will occasionally disagree in sign; reading the direction back out of the same response that
+// produced the factors guarantees the headline and the content always agree.
+function movementTitle(priceChangeText: string | null): string {
+  if (!priceChangeText) return "이날 왜 움직였나요?";
+  if (priceChangeText.startsWith("-")) return "이날 왜 내려갔나요?";
+  if (priceChangeText.startsWith("+")) return "이날 왜 올라갔나요?";
+  return "이날 왜 움직였나요?";
 }
 
 export function ChartMovementPopover({
@@ -28,7 +36,7 @@ export function ChartMovementPopover({
   coordinate,
   containerWidth,
   resetKey,
-  changePercent,
+  priceChangeText,
   intradayNotice,
 }: ChartMovementPopoverProps) {
   const [dismissed, setDismissed] = useState(false);
@@ -70,7 +78,7 @@ export function ChartMovementPopover({
       {status === "error" && <p className="empty-state">{error ?? "분석 요청이 실패했습니다."}</p>}
 
       {status === "success" && (
-        <MovementSection title={movementTitle(changePercent)} items={items} intradayNotice={intradayNotice} />
+        <MovementSection title={movementTitle(priceChangeText)} items={items} intradayNotice={intradayNotice} />
       )}
     </div>
   );
