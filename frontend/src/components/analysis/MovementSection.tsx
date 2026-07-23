@@ -14,13 +14,14 @@ const EVIDENCE_TYPE_LABEL: Record<MovementItem["evidence_type"], string> = {
 };
 
 interface MovementSectionProps {
+  title: string;
   items: MovementItem[];
 }
 
-export function MovementSection({ items }: MovementSectionProps) {
+export function MovementSection({ title, items }: MovementSectionProps) {
   return (
     <section className="analysis-section">
-      <h4 className="analysis-section__title">이날 왜 움직였나요?</h4>
+      <h4 className="analysis-section__title">{title}</h4>
 
       {items.length === 0 ? (
         <p className="empty-state">확인된 배경 정보가 아직 충분하지 않아요.</p>

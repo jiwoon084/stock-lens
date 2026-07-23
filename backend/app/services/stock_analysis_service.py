@@ -10,6 +10,7 @@ user-selectable SOLAR/Gemini toggle are untouched.
 
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -44,6 +45,9 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 1
 MARKET_DATA_SOURCE_ID = "market-data"
 DEFAULT_CAUTION = "공개된 정보만으로 이날 주가가 움직인 이유를 하나로 확정할 수는 없어요."
+# "오늘"은 장이 아직 끝나지 않아 change_percent/뉴스·공시 커버리지가 그 순간까지의 스냅샷일
+# 뿐이라, 과거의 완결된 하루보다 근거가 더 잠정적임 — 이 사실을 사용자에게 명시적으로 알림.
+INTRADAY_CAUTION_SUFFIX = " 아직 장이 끝나지 않아 마감 전까지 결과가 달라질 수 있어요."
 NO_DATA_SUMMARY = "이 날짜에는 설명에 활용할 공식 공시나 관련 뉴스가 충분하지 않아요."
 
 _SUPPLY_CONTRACT_KEYWORD = "공급계약"
@@ -399,5 +403,14 @@ def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = Non
         result = _fallback_result(llm_input)
     else:
         result = _generate_result(llm_input, llm_provider)
+
+    if selected_date == date.today().isoformat():
+        result = result.model_copy(
+            update={
+                "detail_panel": result.detail_panel.model_copy(
+                    update={"caution": result.detail_panel.caution + INTRADAY_CAUTION_SUFFIX}
+                )
+            }
+        )
 
     return StockAnalysisResponse(analysis=result, sources=_build_sources_map(disclosures, news))

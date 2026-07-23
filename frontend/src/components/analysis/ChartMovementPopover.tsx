@@ -12,6 +12,12 @@ interface ChartMovementPopoverProps {
   coordinate: ChartCoordinate | null;
   containerWidth: number;
   resetKey: string;
+  changePercent: number | null;
+}
+
+function movementTitle(changePercent: number | null): string {
+  if (!changePercent) return "이날 왜 움직였나요?";
+  return changePercent > 0 ? "이날 왜 올라갔나요?" : "이날 왜 내려갔나요?";
 }
 
 export function ChartMovementPopover({
@@ -21,6 +27,7 @@ export function ChartMovementPopover({
   coordinate,
   containerWidth,
   resetKey,
+  changePercent,
 }: ChartMovementPopoverProps) {
   const [dismissed, setDismissed] = useState(false);
 
@@ -60,7 +67,7 @@ export function ChartMovementPopover({
 
       {status === "error" && <p className="empty-state">{error ?? "분석 요청이 실패했습니다."}</p>}
 
-      {status === "success" && <MovementSection items={items} />}
+      {status === "success" && <MovementSection title={movementTitle(changePercent)} items={items} />}
     </div>
   );
 }

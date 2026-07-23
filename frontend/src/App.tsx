@@ -168,6 +168,7 @@ export default function App() {
                     coordinate={pointCoordinate}
                     containerWidth={chartWidth}
                     resetKey={selectedIntradayIso ?? selectedPoint?.time ?? ""}
+                    changePercent={selectedPoint?.change_percent ?? null}
                   />
                 </div>
                 <SelectedPointInfo point={selectedPoint} />
