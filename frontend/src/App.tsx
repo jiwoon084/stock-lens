@@ -18,6 +18,8 @@ import { AnalysisDetailPanel } from "./components/analysis/AnalysisDetailPanel";
 import { useStockAnalysis } from "./components/analysis/useStockAnalysis";
 import { Card } from "./shared/components/Card";
 import { LoadingSpinner } from "./shared/components/LoadingSpinner";
+import { TermPopover } from "./shared/components/TermPopover";
+import { TermPopoverProvider } from "./shared/context/TermPopoverContext";
 import type { LlmProvider } from "./shared/types/explanation";
 import type { PricePoint } from "./shared/types/stock";
 
@@ -122,90 +124,93 @@ export default function App() {
   }
 
   return (
-    <div className="page">
-      <header className="app-topbar">
-        <span className="app-topbar__logo">Stock Lens</span>
-        <span className="app-topbar__tagline">차트에서 날짜를 선택하면 주가 변동 요인을 분석합니다</span>
-      </header>
+    <TermPopoverProvider>
+      <div className="page">
+        <header className="app-topbar">
+          <span className="app-topbar__logo">Stock Lens</span>
+          <span className="app-topbar__tagline">차트에서 날짜를 선택하면 주가 변동 요인을 분석합니다</span>
+        </header>
 
-      <section className="stock-summary">
-        <StockSelector stocks={stocks} selectedTicker={ticker} onSelect={handleSelectTicker} />
-        <StockHeader stocks={stocks} ticker={ticker} prices={prices} live={live} asOf={liveAsOf} />
-      </section>
+        <section className="stock-summary">
+          <StockSelector stocks={stocks} selectedTicker={ticker} onSelect={handleSelectTicker} />
+          <StockHeader stocks={stocks} ticker={ticker} prices={prices} live={live} asOf={liveAsOf} />
+        </section>
 
-      <div className="workspace">
-        <div className="workspace__main">
-          <Card
-            className="chart-card"
-            title={
-              <span className="chart-card__title-row">
-                주가 차트
-                <ChartTypeToggle chartType={chartType} onChange={setChartType} />
-              </span>
-            }
-            actions={<ChartToolbar period={period} onChangePeriod={setPeriod} />}
-          >
-            {pricesError && <div className="error-banner">{pricesError}</div>}
-            {pricesLoading ? (
-              <LoadingSpinner label="가격 데이터를 불러오는 중입니다..." />
-            ) : (
-              <>
-                <div className="price-chart__wrapper" ref={chartWrapperRef}>
-                  <PriceChart
-                    prices={visiblePrices}
-                    intradayPrices={intradayPrices}
-                    isIntradayView={isIntradayView}
-                    selectedTime={selectedPoint?.time ?? null}
-                    chartType={chartType}
-                    onSelectPoint={handleSelectPoint}
-                    onSelectIntradayPoint={handleSelectIntradayPoint}
-                    onSelectedPointCoordinate={setPointCoordinate}
-                  />
-                  <ChartMovementPopover
+        <div className="workspace">
+          <div className="workspace__main">
+            <Card
+              className="chart-card"
+              title={
+                <span className="chart-card__title-row">
+                  주가 차트
+                  <ChartTypeToggle chartType={chartType} onChange={setChartType} />
+                </span>
+              }
+              actions={<ChartToolbar period={period} onChangePeriod={setPeriod} />}
+            >
+              {pricesError && <div className="error-banner">{pricesError}</div>}
+              {pricesLoading ? (
+                <LoadingSpinner label="가격 데이터를 불러오는 중입니다..." />
+              ) : (
+                <>
+                  <div className="price-chart__wrapper" ref={chartWrapperRef}>
+                    <PriceChart
+                      prices={visiblePrices}
+                      intradayPrices={intradayPrices}
+                      isIntradayView={isIntradayView}
+                      selectedTime={selectedPoint?.time ?? null}
+                      chartType={chartType}
+                      onSelectPoint={handleSelectPoint}
+                      onSelectIntradayPoint={handleSelectIntradayPoint}
+                      onSelectedPointCoordinate={setPointCoordinate}
+                    />
+                    <ChartMovementPopover
+                      status={analysisStatus}
+                      items={analysisData?.analysis.detail_panel.why_it_moved ?? []}
+                      error={analysisError}
+                      coordinate={pointCoordinate}
+                      containerWidth={chartWidth}
+                      resetKey={selectedIntradayIso ?? selectedPoint?.time ?? ""}
+                    />
+                  </div>
+                  <SelectedPointInfo point={selectedPoint} />
+                  <ChartSummaryCard
                     status={analysisStatus}
-                    items={analysisData?.analysis.detail_panel.why_it_moved ?? []}
+                    chartCard={analysisData?.analysis.chart_card ?? null}
                     error={analysisError}
-                    coordinate={pointCoordinate}
-                    containerWidth={chartWidth}
-                    resetKey={selectedIntradayIso ?? selectedPoint?.time ?? ""}
+                    sources={analysisData?.sources ?? {}}
+                    onSelectPrimaryEvidence={handleSelectPrimaryEvidence}
                   />
-                </div>
-                <SelectedPointInfo point={selectedPoint} />
-                <ChartSummaryCard
-                  status={analysisStatus}
-                  chartCard={analysisData?.analysis.chart_card ?? null}
-                  error={analysisError}
-                  sources={analysisData?.sources ?? {}}
-                  onSelectPrimaryEvidence={handleSelectPrimaryEvidence}
-                />
-              </>
-            )}
-          </Card>
+                </>
+              )}
+            </Card>
 
-          <MarketEventsPanel
-            prices={visiblePrices}
-            selectedPoint={selectedPoint}
-            status={status}
-            data={data}
-            error={error}
-            llmProvider={llmProvider}
-            onChangeProvider={handleChangeProvider}
-            onSelectPoint={handleSelectPoint}
-            onRetry={handleRetry}
-          />
-        </div>
+            <MarketEventsPanel
+              prices={visiblePrices}
+              selectedPoint={selectedPoint}
+              status={status}
+              data={data}
+              error={error}
+              llmProvider={llmProvider}
+              onChangeProvider={handleChangeProvider}
+              onSelectPoint={handleSelectPoint}
+              onRetry={handleRetry}
+            />
+          </div>
 
-        <div className="workspace__side">
-          <AnalysisDetailPanel
-            status={analysisStatus}
-            data={analysisData}
-            error={analysisError}
-            ticker={ticker}
-            selectedDate={selectedPoint?.time ?? null}
-            onRetry={handleRetryAnalysis}
-          />
+          <div className="workspace__side">
+            <AnalysisDetailPanel
+              status={analysisStatus}
+              data={analysisData}
+              error={analysisError}
+              ticker={ticker}
+              selectedDate={selectedPoint?.time ?? null}
+              onRetry={handleRetryAnalysis}
+            />
+          </div>
         </div>
       </div>
-    </div>
+      <TermPopover />
+    </TermPopoverProvider>
   );
 }

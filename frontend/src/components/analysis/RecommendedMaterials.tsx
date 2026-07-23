@@ -1,3 +1,4 @@
+import { HighlightedText } from "../../shared/components/HighlightedText";
 import type { RecommendedMaterial, SourceMetadata } from "../../types/stockAnalysis";
 
 const SOURCE_TYPE_LABEL: Record<SourceMetadata["source_type"], string> = {
@@ -14,7 +15,8 @@ interface RecommendedMaterialsProps {
 export function RecommendedMaterials({ materials, sources }: RecommendedMaterialsProps) {
   return (
     <section className="analysis-section">
-      <h4 className="analysis-section__title">더 읽어볼 자료</h4>
+      <h4 className="analysis-section__title">근거 원문 자료</h4>
+      <p className="analysis-section__subtitle">지금 바로 원문을 확인할 수 있어요</p>
 
       {materials.length === 0 ? (
         <p className="empty-state">추천할 자료가 아직 충분하지 않아요.</p>
@@ -36,7 +38,9 @@ export function RecommendedMaterials({ materials, sources }: RecommendedMaterial
                 </div>
 
                 <p className="recommended-material-card__title">{source?.title ?? "출처 정보를 찾을 수 없어요"}</p>
-                <p className="recommended-material-card__description">{material.description}</p>
+                <p className="recommended-material-card__description">
+                  <HighlightedText text={material.description} />
+                </p>
 
                 {material.information_to_verify.length > 0 && (
                   <ul className="recommended-material-card__topics">

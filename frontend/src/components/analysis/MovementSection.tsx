@@ -1,3 +1,4 @@
+import { HighlightedText } from "../../shared/components/HighlightedText";
 import type { MovementItem, MovementStatus } from "../../types/stockAnalysis";
 
 const STATUS_LABEL: Record<MovementStatus, string> = {
@@ -37,7 +38,9 @@ export function MovementSection({ items }: MovementSectionProps) {
                 </span>
               </div>
               <p className="movement-item__title">{item.title}</p>
-              <p className="movement-item__description">{item.description}</p>
+              <p className="movement-item__description">
+                <HighlightedText text={item.description} />
+              </p>
             </li>
           ))}
         </ul>
