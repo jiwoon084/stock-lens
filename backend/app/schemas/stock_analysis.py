@@ -47,6 +47,9 @@ class MarketDataContext(BaseModel):
     benchmark_name: str | None = None
     benchmark_change_text: str | None = None
     market_comparison_text: str | None = None
+    # 장이 아직 끝나지 않은 "오늘"인지 — true면 등락 방향이 확정되지 않았으므로 why_it_moved가
+    # 원인 주장 대신 중립적 사실 나열로 바뀜(프롬프트 참고).
+    is_intraday: bool = False
 
 
 class DisclosureContext(BaseModel):
@@ -135,6 +138,9 @@ class DetailPanel(BaseModel):
     what_to_watch: list[WatchItem] = Field(default_factory=list, max_length=3)
     recommended_materials: list[RecommendedMaterial] = Field(default_factory=list, max_length=2)
     caution: str
+    # "오늘"(장중) 분석에만 채워짐 — why_it_moved의 신뢰성에 직접 영향을 주는 정보라, 일반
+    # caution(사이드바용)과 분리해 프론트가 이날 왜 움직였나요 팝오버 쪽에 붙일 수 있게 함.
+    intraday_notice: str | None = None
 
 
 class StockAnalysisResult(BaseModel):

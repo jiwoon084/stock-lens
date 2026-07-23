@@ -11,6 +11,8 @@ this graph back via a *local* import inside `analyze_date()` (not at its own top
 otherwise this would be a circular import. See app/agent/graph.py's docstring.
 """
 
+from datetime import date
+
 from app.agent.state import AnalysisGraphState
 from app.rules.watch_item_templates import generate_allowed_watch_items
 from app.schemas.stock_analysis import LLMInputContext
@@ -44,13 +46,18 @@ def fetch_market_data(state: AnalysisGraphState) -> dict:
 
     point = prices[index]
     direction = "up" if point.change_percent > 0 else "down" if point.change_percent < 0 else "flat"
+    # "오늘"은 장이 아직 끝나지 않아 change_percent가 마감 전까지 계속 바뀔 수 있음 —
+    # market_data.is_intraday로 넘겨서 프롬프트가 원인 주장 대신 중립적 사실 나열로 전환하고,
+    # analyze_date()가 이 값으로 intraday_notice를 붙일지 결정한다.
+    is_intraday = selected_date == date.today().isoformat()
 
     return {
         "company_name": stock.name,
         "prices": prices,
         "price_index": index,
         "direction": direction,
-        "market_data": sas._build_market_data_context(prices, index),
+        "is_intraday": is_intraday,
+        "market_data": sas._build_market_data_context(prices, index, is_intraday),
     }
 
 

@@ -23,6 +23,7 @@ class AnalysisGraphState(TypedDict, total=False):
     prices: list[PricePoint]
     price_index: int
     direction: str
+    is_intraday: bool
     market_data: MarketDataContext
 
     # set by nodes.retrieve_evidence

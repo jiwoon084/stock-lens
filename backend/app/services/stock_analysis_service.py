@@ -41,6 +41,10 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 1
 MARKET_DATA_SOURCE_ID = "market-data"
 DEFAULT_CAUTION = "공개된 정보만으로 이날 주가가 움직인 이유를 하나로 확정할 수는 없어요."
+# "오늘"은 장이 아직 끝나지 않아 change_percent/뉴스·공시 커버리지가 그 순간까지의 스냅샷일
+# 뿐이라, 과거의 완결된 하루보다 근거가 더 잠정적임 — why_it_moved(팝오버)의 신뢰성에 직접
+# 영향을 주는 정보라 detail_panel.caution(사이드바)이 아니라 별도 intraday_notice로 분리.
+INTRADAY_NOTICE = "아직 장이 끝나지 않아 마감 전까지 결과가 달라질 수 있어요."
 NO_DATA_SUMMARY = "이 날짜에는 설명에 활용할 공식 공시나 관련 뉴스가 충분하지 않아요."
 
 _SUPPLY_CONTRACT_KEYWORD = "공급계약"
@@ -74,7 +78,7 @@ def _volume_ratio_20d(prices: list[PricePoint], index: int) -> float | None:
     return prices[index].volume / avg_volume
 
 
-def _build_market_data_context(prices: list[PricePoint], index: int) -> MarketDataContext:
+def _build_market_data_context(prices: list[PricePoint], index: int, is_intraday: bool = False) -> MarketDataContext:
     point = prices[index]
     ratio = _volume_ratio_20d(prices, index)
     return MarketDataContext(
@@ -84,6 +88,7 @@ def _build_market_data_context(prices: list[PricePoint], index: int) -> MarketDa
         change_percent=point.change_percent,
         volume=point.volume,
         volume_ratio_20d=ratio,
+        is_intraday=is_intraday,
         volume_comparison_text=f"평소의 {ratio:.1f}배" if ratio is not None else None,
     )
 
@@ -371,7 +376,10 @@ def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = Non
     except DateNotFoundError as exc:
         raise UnknownDateError(f"No price data for {ticker} on {selected_date}") from exc
 
-    return StockAnalysisResponse(
-        analysis=final_state["result"],
-        sources=_build_sources_map(final_state["disclosures"], final_state["news"]),
-    )
+    result = final_state["result"]
+    if final_state["is_intraday"]:
+        result = result.model_copy(
+            update={"detail_panel": result.detail_panel.model_copy(update={"intraday_notice": INTRADAY_NOTICE})}
+        )
+
+    return StockAnalysisResponse(analysis=result, sources=_build_sources_map(final_state["disclosures"], final_state["news"]))
