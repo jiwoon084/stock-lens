@@ -27,6 +27,10 @@ export default function App() {
   const [chartType, setChartType] = useState<ChartType>("candle");
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("solar");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
+  // ChartMovementPopover's dismiss state resets on resetKey change. selectedPoint.time alone
+  // can't drive that for intraday clicks — every minute clicked on "오늘" synthesizes the SAME
+  // date, so picking a different minute after dismissing the popover would never bring it back.
+  const [selectedIntradayIso, setSelectedIntradayIso] = useState<string | null>(null);
   const [pointCoordinate, setPointCoordinate] = useState<ChartCoordinate | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
   const chartWrapperResizeObserverRef = useRef<ResizeObserver | null>(null);
@@ -60,6 +64,7 @@ export default function App() {
 
   useEffect(() => {
     setSelectedPoint(null);
+    setSelectedIntradayIso(null);
     reset();
     resetAnalysis();
   }, [ticker, reset, resetAnalysis]);
@@ -73,6 +78,7 @@ export default function App() {
 
   function handleSelectPoint(point: PricePoint) {
     setSelectedPoint(point);
+    setSelectedIntradayIso(null);
     void explain(ticker, point.time, "1d", llmProvider);
     void analyze(ticker, point.time);
   }
@@ -95,6 +101,7 @@ export default function App() {
       change_percent: live?.change_percent ?? changePercent,
       volume_change_percent: 0,
     });
+    setSelectedIntradayIso(isoTime);
   }
 
   function handleRetry() {
@@ -160,7 +167,7 @@ export default function App() {
                     error={analysisError}
                     coordinate={pointCoordinate}
                     containerWidth={chartWidth}
-                    resetKey={selectedPoint?.time ?? ""}
+                    resetKey={selectedIntradayIso ?? selectedPoint?.time ?? ""}
                   />
                 </div>
                 <SelectedPointInfo point={selectedPoint} />

@@ -431,6 +431,19 @@ KIS 서버 자체에서 500 Internal Server Error**를 반환함(재현 성공) 
 100% 성공으로 확인됨. `test_market_data_service.py`에 캐시/스테일 폴백 테스트 3개 추가,
 백엔드 63개 테스트 통과.
 
+**"오늘 탭에서 팝오버가 여전히 가끔 안 뜬다" (2026-07-23, 같은 날 세 번째 요청) — 이번엔 진짜
+프론트 버그, KIS/백엔드와 무관**: 위 두 건을 고치고도 재현됐는데, 원인이 전혀 달랐음.
+`ChartMovementPopover`의 닫기 상태(`dismissed`)는 `resetKey`가 바뀔 때만 리셋되고,
+`resetKey`는 `selectedPoint?.time`(날짜 문자열)을 씀 — 일봉 뷰에서는 날짜마다 값이 다르니
+문제없지만, **분봉 뷰에서는 어느 분을 클릭해도 합성된 `selectedPoint.time`이 항상 "오늘"
+날짜 하나로 고정**돼서, 팝오버를 한 번이라도 ✕로 닫으면 그날 안에는 다른 분을 아무리 클릭해도
+`resetKey`가 안 바뀌어 다시는 안 뜸(사이드바 "오늘의 체크리스트"는 별개 상태라 정상 갱신되니,
+"체크리스트는 뜨는데 팝오버만 안 뜬다"는 증상과 정확히 일치). 고침: `App.tsx`에
+`selectedIntradayIso` state를 추가해 분봉 클릭마다 정확한 클릭 시각(ISO)을 따로 저장하고,
+`resetKey={selectedIntradayIso ?? selectedPoint?.time ?? ""}`로 분봉 클릭은 항상 고유한
+키를 갖도록 함(일봉 클릭 시엔 `null`로 리셋해 기존 동작 그대로 유지). Playwright로 "클릭 →
+닫기 → 다른 분 클릭 → 다시 뜸" 시나리오 직접 검증 완료.
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
