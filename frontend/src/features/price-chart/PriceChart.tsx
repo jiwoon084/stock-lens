@@ -16,6 +16,7 @@ interface PriceChartProps {
   selectedTime: string | null;
   chartType: ChartType;
   onSelectPoint: (point: PricePoint) => void;
+  onSelectIntradayPoint?: (isoTime: string, price: number) => void;
   onSelectedPointCoordinate?: (coordinate: ChartCoordinate | null) => void;
 }
 
@@ -31,13 +32,26 @@ function isoToUtcSeconds(iso: string): number {
   return Math.floor(Date.parse(iso) / 1000);
 }
 
-function formatIntradayTick(time: Time): string {
-  return new Intl.DateTimeFormat("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Seoul",
-  }).format(new Date((time as number) * 1000));
+// Set once at chart creation and never swapped afterward — `chart.applyOptions({ timeScale:
+// { tickMarkFormatter: undefined } })` does NOT actually clear a previously-set formatter (a
+// real bug hit during development: switching away from the intraday view left this formatter
+// active, which then threw "Invalid time value" trying to parse a daily date string as a
+// number on every redraw, freezing the chart). Branching on the value's runtime type instead
+// means one stable formatter handles both modes correctly, so there's nothing to swap.
+function formatTick(time: Time): string {
+  if (typeof time === "number") {
+    return new Intl.DateTimeFormat("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: "Asia/Seoul",
+    }).format(new Date(time * 1000));
+  }
+  if (typeof time === "string") {
+    const [, month, day] = time.split("-");
+    return `${Number(month)}/${Number(day)}`;
+  }
+  return `${time.month}/${time.day}`;
 }
 
 function createDailySeries(chart: IChartApi, chartType: ChartType): DailySeries {
@@ -108,6 +122,7 @@ export function PriceChart({
   selectedTime,
   chartType,
   onSelectPoint,
+  onSelectIntradayPoint,
   onSelectedPointCoordinate,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -117,7 +132,27 @@ export function PriceChart({
   const intradayRef = useRef<IntradayPoint[]>(intradayPrices);
   const selectedTimeRef = useRef<string | null>(selectedTime);
   const onCoordinateRef = useRef(onSelectedPointCoordinate);
+  const onSelectIntradayPointRef = useRef(onSelectIntradayPoint);
   const isIntradayViewRef = useRef(isIntradayView);
+  // Exact clicked intraday timestamp, for precise popover positioning — `selectedTime` (shared
+  // with the daily view) only carries a date, not a minute, so it can't pinpoint a spot on the
+  // intraday line by itself.
+  const selectedIntradayIsoRef = useRef<string | null>(null);
+  // `visiblePrices`/`intradayPrices` are freshly-sliced arrays on every parent render (App.tsx
+  // doesn't memoize them), so effects keyed on them re-run far more often than the data actually
+  // changes. That's harmless on its own, but emitting a brand-new {x,y} object on every one of
+  // those re-runs never lets React bail out of re-rendering (object identity always differs even
+  // when the values don't) — which re-triggers the parent, which re-runs this effect again,
+  // looping forever. Comparing by value before calling the callback breaks the cascade.
+  const lastCoordinateRef = useRef<ChartCoordinate | null>(null);
+
+  function emitCoordinate(next: ChartCoordinate | null) {
+    const prev = lastCoordinateRef.current;
+    const unchanged = prev === next || (prev !== null && next !== null && prev.x === next.x && prev.y === next.y);
+    if (unchanged) return;
+    lastCoordinateRef.current = next;
+    onCoordinateRef.current?.(next);
+  }
 
   useEffect(() => {
     pricesRef.current = prices;
@@ -136,23 +171,43 @@ export function PriceChart({
   }, [onSelectedPointCoordinate]);
 
   useEffect(() => {
+    onSelectIntradayPointRef.current = onSelectIntradayPoint;
+  }, [onSelectIntradayPoint]);
+
+  useEffect(() => {
     isIntradayViewRef.current = isIntradayView;
   }, [isIntradayView]);
 
   function updateSelectedPointCoordinate() {
     const chart = chartRef.current;
     const series = seriesRef.current;
-    const time = selectedTimeRef.current;
-    const point = !isIntradayViewRef.current && time ? pricesRef.current.find((p) => p.time === time) : undefined;
-
-    if (!chart || !series || !point) {
-      onCoordinateRef.current?.(null);
+    if (!chart || !series) {
+      emitCoordinate(null);
       return;
     }
 
+    if (isIntradayViewRef.current) {
+      const iso = selectedIntradayIsoRef.current;
+      const target = iso ? intradayRef.current.find((p) => p.time === iso) : undefined;
+      if (!target) {
+        emitCoordinate(null);
+        return;
+      }
+      const x = chart.timeScale().timeToCoordinate(isoToUtcSeconds(target.time) as Time);
+      const y = series.priceToCoordinate(target.price);
+      emitCoordinate(x === null || y === null ? null : { x, y });
+      return;
+    }
+
+    const time = selectedTimeRef.current;
+    const point = time ? pricesRef.current.find((p) => p.time === time) : undefined;
+    if (!point) {
+      emitCoordinate(null);
+      return;
+    }
     const x = chart.timeScale().timeToCoordinate(point.time as Time);
     const y = series.priceToCoordinate(point.close);
-    onCoordinateRef.current?.(x === null || y === null ? null : { x, y });
+    emitCoordinate(x === null || y === null ? null : { x, y });
   }
 
   useEffect(() => {
@@ -168,7 +223,7 @@ export function PriceChart({
         vertLine: { color: "#d1d5db", width: 1, style: 1, labelBackgroundColor: "#4b5563" },
         horzLine: { color: "#d1d5db", width: 1, style: 1, labelBackgroundColor: "#4b5563" },
       },
-      timeScale: { borderColor: "#e5e7eb" },
+      timeScale: { borderColor: "#e5e7eb", tickMarkFormatter: formatTick },
       rightPriceScale: { borderColor: "#e5e7eb" },
       localization: {
         priceFormatter: (price: number) => Math.round(price).toLocaleString("ko-KR"),
@@ -181,7 +236,17 @@ export function PriceChart({
     });
 
     chart.subscribeClick((param) => {
-      if (isIntradayViewRef.current || !param.time) return;
+      if (!param.time) return;
+
+      if (isIntradayViewRef.current) {
+        const clicked = intradayRef.current.find((p) => isoToUtcSeconds(p.time) === param.time);
+        if (!clicked) return;
+        selectedIntradayIsoRef.current = clicked.time;
+        onSelectIntradayPointRef.current?.(clicked.time, clicked.price);
+        updateSelectedPointCoordinate();
+        return;
+      }
+
       const point = pricesRef.current.find((p) => p.time === param.time);
       if (!point) return;
       onSelectPoint(point);
@@ -216,14 +281,13 @@ export function PriceChart({
       chart.removeSeries(seriesRef.current);
       seriesRef.current = null;
     }
+    selectedIntradayIsoRef.current = null;
 
     if (isIntradayView) {
-      chart.applyOptions({ timeScale: { tickMarkFormatter: formatIntradayTick } });
       const series = createIntradaySeries(chart);
       seriesRef.current = series;
       applyIntradayData(series, intradayRef.current);
     } else {
-      chart.applyOptions({ timeScale: { tickMarkFormatter: undefined } });
       const series = createDailySeries(chart, chartType);
       seriesRef.current = series;
       applyDailyData(series, chartType, pricesRef.current);

@@ -1,17 +1,17 @@
-import type { PricePoint, Stock } from "../../shared/types/stock";
-import { useLivePrice } from "./useLivePrice";
+import type { LivePrice, PricePoint, Stock } from "../../shared/types/stock";
 
 interface StockHeaderProps {
   stocks: Stock[];
   ticker: string;
   prices: PricePoint[];
+  live: LivePrice | null;
+  asOf: string | null;
 }
 
-export function StockHeader({ stocks, ticker, prices }: StockHeaderProps) {
+export function StockHeader({ stocks, ticker, prices, live, asOf }: StockHeaderProps) {
   const stock = stocks.find((s) => s.ticker === ticker);
   const latest = prices[prices.length - 1];
   const prev = prices[prices.length - 2];
-  const { live, asOf } = useLivePrice(ticker);
 
   if (!latest) {
     return <p className="empty-state">가격 정보를 불러오는 중입니다...</p>;

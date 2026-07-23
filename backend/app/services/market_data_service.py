@@ -61,6 +61,36 @@ def get_price_series(ticker: str) -> list[PricePoint]:
     return _generate_mock_price_series(ticker)
 
 
+def get_price_series_with_live_today(ticker: str) -> list[PricePoint]:
+    """Same as get_price_series(), but appends a synthesized "today" row from the live KIS quote
+    when today isn't in the daily series yet (KRX's official EOD feed lags a day). Lets movement
+    analysis (`explanation_service.py`, `stock_analysis_service.py`) work for "오늘" without
+    waiting for the real daily bar. Never used for the chart itself — PriceChart.tsx's dedicated
+    intraday view exists specifically to avoid mixing daily and intraday granularity on one axis.
+    """
+    prices = get_price_series(ticker)
+    today = date.today().isoformat()
+    if prices and prices[-1].time == today:
+        return prices
+
+    live = get_live_price(ticker)
+    if live is None:
+        return prices
+
+    synthetic = PricePoint(
+        time=today,
+        open=live.open,
+        high=live.high,
+        low=live.low,
+        close=live.price,
+        volume=live.volume,
+        change_percent=live.change_percent,
+        # 장 마감 전이라 어제와 "같은 시각 기준" 거래량을 비교할 신뢰할 만한 기준이 없어 0으로 둠.
+        volume_change_percent=0.0,
+    )
+    return [*prices, synthetic]
+
+
 def get_live_price(ticker: str) -> LivePrice | None:
     """Near-real-time current price during market hours, via KIS Developers (demo account).
 

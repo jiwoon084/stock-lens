@@ -6,6 +6,7 @@ import { PriceChart, type ChartCoordinate } from "./features/price-chart/PriceCh
 import { SelectedPointInfo } from "./features/price-chart/SelectedPointInfo";
 import { StockHeader } from "./features/price-chart/StockHeader";
 import { useIntradayPrices } from "./features/price-chart/useIntradayPrices";
+import { useLivePrice } from "./features/price-chart/useLivePrice";
 import { usePriceChart } from "./features/price-chart/usePriceChart";
 import { useMovementExplanation } from "./features/movement-explanation/useMovementExplanation";
 import { MarketEventsPanel } from "./features/market-events/MarketEventsPanel";
@@ -47,6 +48,7 @@ export default function App() {
   const stocks = useStocks();
   const { prices, loading: pricesLoading, error: pricesError } = usePriceChart(ticker);
   const intradayPrices = useIntradayPrices(ticker);
+  const { live, asOf: liveAsOf } = useLivePrice(ticker);
   const { status, data, error, explain, reset } = useMovementExplanation();
   const {
     status: analysisStatus,
@@ -75,6 +77,26 @@ export default function App() {
     void analyze(ticker, point.time);
   }
 
+  // "오늘" 탭(분봉 전용 뷰)에서 클릭한 지점 — 아직 일봉이 없는 오늘 날짜라, 그날의 분석을
+  // 요청하기 위해 클릭한 분봉 가격 + 실시간 시세(useLivePrice)를 합쳐 PricePoint 모양으로
+  // 맞춰서 기존 handleSelectPoint 흐름(explain/analyze)을 그대로 재사용한다.
+  function handleSelectIntradayPoint(isoTime: string, price: number) {
+    const today = isoTime.slice(0, 10);
+    const prevClose = prices[prices.length - 1]?.close ?? price;
+    const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
+
+    handleSelectPoint({
+      time: today,
+      open: live?.open ?? price,
+      high: live?.high ?? price,
+      low: live?.low ?? price,
+      close: price,
+      volume: live?.volume ?? 0,
+      change_percent: live?.change_percent ?? changePercent,
+      volume_change_percent: 0,
+    });
+  }
+
   function handleRetry() {
     if (selectedPoint) void explain(ticker, selectedPoint.time, "1d", llmProvider);
   }
@@ -101,7 +123,7 @@ export default function App() {
 
       <section className="stock-summary">
         <StockSelector stocks={stocks} selectedTicker={ticker} onSelect={handleSelectTicker} />
-        <StockHeader stocks={stocks} ticker={ticker} prices={prices} />
+        <StockHeader stocks={stocks} ticker={ticker} prices={prices} live={live} asOf={liveAsOf} />
       </section>
 
       <div className="workspace">
@@ -129,6 +151,7 @@ export default function App() {
                     selectedTime={selectedPoint?.time ?? null}
                     chartType={chartType}
                     onSelectPoint={handleSelectPoint}
+                    onSelectIntradayPoint={handleSelectIntradayPoint}
                     onSelectedPointCoordinate={setPointCoordinate}
                   />
                   <ChartMovementPopover

@@ -372,9 +372,47 @@ git 히스토리(커밋 `7760d32`~`0a71d36`)에서 다시 꺼내와 적용함.
 렌더링** — `ChartToolbar`에 `"today"`(라벨 "오늘") 기간 탭을 추가했고, `PriceChart.tsx`가
 `isIntradayView` prop에 따라 완전히 다른 렌더링 경로를 탐(일봉 경로는 기존 business-day
 문자열 시간 그대로 원복, 분봉 경로는 UTCTimestamp 기반 균질한 Area 시리즈 + `Intl.DateTimeFormat`
-(Asia/Seoul)로 HH:MM 틱 포맷). 분봉 뷰에서는 날짜 클릭 선택(분석 요청)도 비활성화함 — 요인
-분석은 "하루" 단위 개념이라 분 단위 틱 선택은 의미가 없음. 이 설계가 실제 트레이딩 플랫폼들이
-일봉 뷰와 분봉/틱 뷰를 같은 축에 섞지 않고 별도 모드로 두는 것과 같은 이유임.
+(Asia/Seoul)로 HH:MM 틱 포맷). 이 설계가 실제 트레이딩 플랫폼들이 일봉 뷰와 분봉/틱 뷰를 같은
+축에 섞지 않고 별도 모드로 두는 것과 같은 이유임.
+
+**"오늘" 탭에서도 차트 클릭 → 원인 후보 분석이 떠야 한다는 요청 (2026-07-23, 바로 다음 요청) —
+백엔드에 새 갭 하나, 프론트에 실제 버그 두 개 발견/수정**: 처음엔 분봉 뷰에서 날짜 클릭 선택을
+아예 비활성화했었는데("분 단위 틱 선택은 의미 없다"는 판단), 사용자가 오늘 탭에서도 눌러서
+분석을 보고 싶다고 명시적으로 요청함. 구현하다 보니 세 가지가 필요했음:
+1. **백엔드 갭**: `explanation_service.py`/`stock_analysis_service.py` 둘 다 `selected_date`에
+   해당하는 일봉을 못 찾으면(`next((p for p in prices if p.time == selected_date), None)`)
+   무조건 `UnknownDateError`(400)를 던짐 — "오늘"은 KRX EOD 데이터가 다음 영업일에야 올라오는
+   구조상 영원히 이 조건을 못 만족함. `market_data_service.get_price_series_with_live_today()`를
+   추가해서, 오늘 날짜가 일봉에 없으면 실시간 시세(`get_live_price()`)로 `PricePoint`를 합성해
+   리스트 끝에 붙여줌(거래량 등 실수치는 그대로 쓰되, `volume_change_percent`는 비교 기준이
+   없어 0으로 둠) — 두 서비스 다 `get_price_series()` 대신 이 함수를 쓰도록 교체. 차트
+   렌더링(`/prices` 엔드포인트)에는 이 함수를 안 씀 — 거기 섞으면 위에서 고친 "일봉+분봉 축
+   혼합" 문제가 그대로 재발함.
+2. **프론트 버그 #1 — 탭 전환이 먹통이 됨**: `chart.applyOptions({ timeScale:
+   { tickMarkFormatter: undefined } })`로 분봉용 포맷터를 지우려 했는데, lightweight-charts가
+   `undefined`를 줘도 이전에 설정한 함수를 실제로 안 지움 — 그래서 오늘→다른 기간 탭으로
+   전환하면 분봉용 포맷터가 일봉 문자열 시간을 숫자로 캐스팅하려다 매 리드로우마다
+   `RangeError: Invalid time value`를 던지며 차트가 사실상 멈춤(사용자가 "탭 전환이 안 된다"고
+   보고한 원인). 고침: 포맷터를 껐다 켰다 하지 않고, **`time` 값의 런타임 타입으로 분기하는
+   포맷터 하나를 차트 생성 시 한 번만** 설정(`formatTick()`).
+3. **프론트 버그 #2 — 무한 렌더 루프**: 위 기능을 다 붙인 뒤 실제 클릭해보니 "Maximum update
+   depth exceeded" 경고와 함께 브라우저가 버벅임. 원인: `App.tsx`의 `visiblePrices =
+   filterPricesByPeriod(prices, period)`가 렌더마다 새 배열을 만드는데(오늘 탭은 항상 새
+   `[]`), `PriceChart.tsx`의 좌표 계산 effect가 이 배열을 의존성으로 갖고 있어 렌더마다
+   재실행됨 — 재실행할 때마다 `{x, y}` 새 객체를 만들어 `setPointCoordinate`를 호출하는데,
+   객체는 값이 같아도 참조가 달라 React가 리렌더를 건너뛰지 못해 무한 루프가 됨(일봉 뷰는
+   `selectedTime`이라는 원시값 의존성 덕에 우연히 안전했던 것). 고침: `PriceChart.tsx`에
+   `lastCoordinateRef` + `emitCoordinate()`를 추가해서 **값이 실제로 달라졌을 때만**
+   `onSelectedPointCoordinate` 콜백을 호출하도록 방어.
+4. **프론트 나머지**: 클릭한 분봉 시각+가격을 실제 분석 요청(오늘 날짜)으로 연결하기 위해
+   `useLivePrice`를 `StockHeader` 내부에서 `App.tsx`로 끌어올리고(prop으로 전달), 클릭 시
+   `handleSelectIntradayPoint()`가 라이브 시세(open/high/low/volume)를 합성 `PricePoint`에
+   채워 기존 `handleSelectPoint()` 흐름(explain/analyze 둘 다 호출)을 그대로 재사용. 팝오버
+   위치는 `selectedTime`(날짜만, 분 단위 아님)으로는 못 찍어서 `PriceChart.tsx`에
+   `selectedIntradayIsoRef`(정확히 클릭한 분봉의 ISO 타임스탬프)를 따로 둬서 좌표 계산.
+   Playwright로 실제 KIS 데이터 기반 종단 검증 완료(팝오버가 클릭 지점에 정확히 뜨고, 사이드바
+   "오늘의 체크리스트"도 채워짐, 콘솔 에러 0개, 탭 전환도 반복 테스트 통과). 백엔드 60개 테스트
+   통과, 프론트 빌드 정상.
 
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 

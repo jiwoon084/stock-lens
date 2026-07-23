@@ -365,7 +365,7 @@ def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = Non
     if stock is None:
         raise UnknownTickerError(f"Unknown ticker: {ticker}")
 
-    prices = market_data_service.get_price_series(ticker)
+    prices = market_data_service.get_price_series_with_live_today(ticker)
     index = next((i for i, p in enumerate(prices) if p.time == selected_date), None)
     if index is None:
         raise UnknownDateError(f"No price data for {ticker} on {selected_date}")
