@@ -1,6 +1,7 @@
 import logging
 import random
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 
 from app.core.config import settings
 from app.schemas.stock import IntradayPoint, LivePrice, PricePoint, Stock
@@ -48,15 +49,47 @@ def get_stock(ticker: str) -> Stock | None:
     return next((stock for stock in SAMPLE_STOCKS if stock.ticker == ticker), None)
 
 
+@lru_cache(maxsize=64)
+def _cached_kis_gap_fill(ticker: str, after_date: str, as_of: str) -> tuple[PricePoint, ...]:
+    """Real daily bars from KIS for the dates strictly after `after_date` (the official KRX
+    series' last row) through today. `as_of` (today, passed by the caller) only busts this
+    cache once a day — same pattern as krx_price_client._cached_fetch.
+
+    Exists because data.go.kr's official EOD feed lags settlement by MORE than one business day
+    in practice (confirmed empirically: a Thursday's bar was still missing the following Friday
+    morning) — KIS's own daily book is current same-day since it's the broker's live data, not a
+    government publication. Returns empty on any failure/no KIS key so callers just keep the
+    official series unfilled rather than breaking.
+    """
+    if not settings.kis_app_key or not settings.kis_app_secret:
+        return ()
+    try:
+        fetched = kis_client.fetch_daily_prices(ticker, date.fromisoformat(after_date), date.fromisoformat(as_of))
+    except kis_client.KisApiError as exc:
+        logger.warning("KIS daily gap-fill failed for %s: %s", ticker, exc)
+        return ()
+    return tuple(p for p in fetched if p.time > after_date)
+
+
 def get_price_series(ticker: str) -> list[PricePoint]:
     """Real KRX daily prices when KRX_API_KEY is configured, otherwise (or on any failure of
     that real call) a deterministic mock series — see docs/project-plan.md M1.
+
+    When the official series' most recent day is more than one calendar day behind today (the
+    settlement-lag gap above, not just an ordinary weekend), tries to fill the missing day(s)
+    from KIS before returning — see _cached_kis_gap_fill.
     """
     if settings.krx_api_key:
         try:
-            return krx_price_client.fetch_price_series(ticker)
+            prices = krx_price_client.fetch_price_series(ticker)
         except krx_price_client.KrxApiError as exc:
             logger.warning("KRX price fetch failed for %s, falling back to mock: %s", ticker, exc)
+        else:
+            if prices and prices[-1].time < (date.today() - timedelta(days=1)).isoformat():
+                gap_fill = _cached_kis_gap_fill(ticker, prices[-1].time, date.today().isoformat())
+                if gap_fill:
+                    prices = [*prices, *gap_fill]
+            return prices
 
     return _generate_mock_price_series(ticker)
 

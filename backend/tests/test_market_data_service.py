@@ -1,9 +1,10 @@
+from datetime import date as real_date
 from unittest.mock import Mock, patch
 
 import pytest
 
 from app.core.config import settings
-from app.schemas.stock import LivePrice
+from app.schemas.stock import LivePrice, PricePoint
 from app.services import kis_client, krx_price_client, market_data_service
 
 
@@ -185,3 +186,96 @@ def test_get_live_price_returns_none_without_any_cache_on_first_failure():
         result = market_data_service.get_live_price("005930")
 
     assert result is None
+
+
+@pytest.fixture(autouse=True)
+def _reset_kis_gap_fill_cache():
+    market_data_service._cached_kis_gap_fill.cache_clear()
+    yield
+    market_data_service._cached_kis_gap_fill.cache_clear()
+
+
+def _patched_today(day: real_date):
+    """The module calls date.today()/date.fromisoformat() directly — patching the whole `date`
+    name lets today() return a fixed value while fromisoformat still behaves for real.
+    """
+    patcher = patch("app.services.market_data_service.date")
+    mock_date = patcher.start()
+    mock_date.today.return_value = day
+    mock_date.fromisoformat.side_effect = real_date.fromisoformat
+    return patcher
+
+
+def test_get_price_series_fills_gap_with_kis_when_official_data_lags():
+    ticker = market_data_service.SAMPLE_STOCKS[0].ticker
+    settings.krx_api_key = "test-key"
+    settings.kis_app_key = "test-key"
+    settings.kis_app_secret = "test-secret"
+    items = [
+        _sample_item("20260720", close=81000.0, volume=650_000, flt_rt=0.1),  # baseline row, dropped by fetch_price_series
+        _sample_item("20260721", close=82000.0, volume=700_000, flt_rt=0.2),
+        _sample_item("20260722", close=83000.0, volume=800_000, flt_rt=-0.5),
+    ]
+    gap_point = PricePoint(
+        time="2026-07-23", open=83000.0, high=84000.0, low=82500.0, close=84000.0,
+        volume=900_000, change_percent=1.2, volume_change_percent=12.5,
+    )
+
+    patcher = _patched_today(real_date(2026, 7, 24))  # 2 calendar days after the official series' last row
+    try:
+        with patch.object(krx_price_client.requests, "get", return_value=_fake_response(items=items)), patch.object(
+            kis_client, "fetch_daily_prices", return_value=[gap_point]
+        ) as mock_kis:
+            result = market_data_service.get_price_series(ticker)
+    finally:
+        patcher.stop()
+
+    assert [p.time for p in result] == ["2026-07-21", "2026-07-22", "2026-07-23"]
+    mock_kis.assert_called_once()
+
+
+def test_get_price_series_skips_gap_fill_when_data_already_current():
+    ticker = market_data_service.SAMPLE_STOCKS[0].ticker
+    settings.krx_api_key = "test-key"
+    settings.kis_app_key = "test-key"
+    settings.kis_app_secret = "test-secret"
+    items = [
+        _sample_item("20260720", close=81000.0, volume=650_000, flt_rt=0.1),  # baseline row, dropped by fetch_price_series
+        _sample_item("20260721", close=82000.0, volume=700_000, flt_rt=0.2),
+        _sample_item("20260722", close=83000.0, volume=800_000, flt_rt=-0.5),
+    ]
+
+    patcher = _patched_today(real_date(2026, 7, 23))  # official series already covers "yesterday"
+    try:
+        with patch.object(krx_price_client.requests, "get", return_value=_fake_response(items=items)), patch.object(
+            kis_client, "fetch_daily_prices"
+        ) as mock_kis:
+            result = market_data_service.get_price_series(ticker)
+    finally:
+        patcher.stop()
+
+    assert [p.time for p in result] == ["2026-07-21", "2026-07-22"]
+    mock_kis.assert_not_called()
+
+
+def test_get_price_series_gap_fill_falls_back_gracefully_on_kis_failure():
+    ticker = market_data_service.SAMPLE_STOCKS[0].ticker
+    settings.krx_api_key = "test-key"
+    settings.kis_app_key = "test-key"
+    settings.kis_app_secret = "test-secret"
+    items = [
+        _sample_item("20260720", close=81000.0, volume=650_000, flt_rt=0.1),  # baseline row, dropped by fetch_price_series
+        _sample_item("20260721", close=82000.0, volume=700_000, flt_rt=0.2),
+        _sample_item("20260722", close=83000.0, volume=800_000, flt_rt=-0.5),
+    ]
+
+    patcher = _patched_today(real_date(2026, 7, 24))
+    try:
+        with patch.object(krx_price_client.requests, "get", return_value=_fake_response(items=items)), patch.object(
+            kis_client, "fetch_daily_prices", side_effect=kis_client.KisApiError("boom")
+        ):
+            result = market_data_service.get_price_series(ticker)
+    finally:
+        patcher.stop()
+
+    assert [p.time for p in result] == ["2026-07-21", "2026-07-22"]  # unfilled, but not broken

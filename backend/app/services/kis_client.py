@@ -13,12 +13,12 @@ rather than breaking the page — there's no meaningful "mock" for a real-time q
 is for a historical series.
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import requests
 
 from app.core.config import settings
-from app.schemas.stock import IntradayPoint, LivePrice
+from app.schemas.stock import IntradayPoint, LivePrice, PricePoint
 
 BASE_URL = "https://openapivts.koreainvestment.com:29443"  # 모의투자(demo) 도메인
 TOKEN_URL = f"{BASE_URL}/oauth2/tokenP"
@@ -26,6 +26,8 @@ QUOTE_URL = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-price"
 QUOTE_TR_ID = "FHKST01010100"
 INTRADAY_URL = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
 INTRADAY_TR_ID = "FHKST03010200"
+DAILY_CHART_URL = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
+DAILY_CHART_TR_ID = "FHKST03010100"
 
 # prdy_vrss_sign: 1=상한, 2=상승, 3=보합, 4=하한, 5=하락 (KIS 공식 코드값)
 _UP_SIGNS = {"1", "2"}
@@ -172,3 +174,85 @@ def fetch_intraday_minute_prices(ticker: str) -> list[IntradayPoint]:
         raise KisApiError(f"Unexpected KIS intraday response shape: {exc}") from exc
 
     return list(reversed(points))  # KIS returns newest-first; a chart needs ascending order
+
+
+def fetch_daily_prices(ticker: str, begin: date, end: date) -> list[PricePoint]:
+    """Real daily OHLCV bars from KIS's own book, not the official 금융위원회 data.go.kr feed.
+
+    Used only to fill the most recent day(s) that data.go.kr hasn't published yet — its EOD data
+    lags settlement by more than one business day in practice (confirmed empirically: a Thursday's
+    bar was still missing the following Friday morning even though nothing else was wrong).
+    KIS's own daily chart is current same-day since it's the broker's live book, not a government
+    publication. change_percent/volume_change_percent are recomputed here rather than trusted from
+    a single field, since KIS gives an absolute 전일대비 (prdy_vrss) + sign per row, not a percent.
+    """
+    token = _get_access_token()
+
+    try:
+        response = requests.get(
+            DAILY_CHART_URL,
+            headers={
+                "Content-Type": "application/json; charset=UTF-8",
+                "authorization": f"Bearer {token}",
+                "appkey": settings.kis_app_key,
+                "appsecret": settings.kis_app_secret,
+                "tr_id": DAILY_CHART_TR_ID,
+                "custtype": "P",
+            },
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": ticker,
+                "FID_INPUT_DATE_1": begin.strftime("%Y%m%d"),
+                "FID_INPUT_DATE_2": end.strftime("%Y%m%d"),
+                "FID_PERIOD_DIV_CODE": "D",
+                "FID_ORG_ADJ_PRC": "1",
+            },
+            timeout=5,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except Exception as exc:
+        raise KisApiError(f"KIS daily chart request failed for {ticker}: {exc}") from exc
+
+    if body.get("rt_cd") != "0":
+        raise KisApiError(f"KIS daily chart API returned {body.get('rt_cd')}: {body.get('msg1')}")
+
+    try:
+        rows = sorted(body["output2"], key=lambda row: row["stck_bsop_date"])
+        points: list[PricePoint] = []
+        prev_volume: int | None = None
+
+        for row in rows:
+            close = float(row["stck_clpr"])
+            sign = row["prdy_vrss_sign"]
+            raw_change = float(row["prdy_vrss"])
+            magnitude = abs(raw_change) / (close - raw_change) * 100 if sign in _UP_SIGNS else (
+                abs(raw_change) / (close + raw_change) * 100
+            )
+            change_percent = round(magnitude, 2) if sign in _UP_SIGNS else round(-magnitude, 2)
+            if sign not in _UP_SIGNS and sign not in _DOWN_SIGNS:
+                change_percent = 0.0
+
+            volume = int(row["acml_vol"])
+            volume_change_percent = (
+                round((volume - prev_volume) / prev_volume * 100, 2) if prev_volume else 0.0
+            )
+
+            bsop_date = row["stck_bsop_date"]
+            points.append(
+                PricePoint(
+                    time=f"{bsop_date[0:4]}-{bsop_date[4:6]}-{bsop_date[6:8]}",
+                    open=float(row["stck_oprc"]),
+                    high=float(row["stck_hgpr"]),
+                    low=float(row["stck_lwpr"]),
+                    close=close,
+                    volume=volume,
+                    change_percent=change_percent,
+                    volume_change_percent=volume_change_percent,
+                )
+            )
+            prev_volume = volume
+    except (KeyError, ValueError, TypeError, ZeroDivisionError) as exc:
+        raise KisApiError(f"Unexpected KIS daily chart response shape: {exc}") from exc
+
+    return points
