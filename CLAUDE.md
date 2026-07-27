@@ -805,6 +805,22 @@ graceful fallback) — 77개 전체 통과. 실제 API로 SK하이닉스 7/23 �
 Orchestrator 리팩터·LLM 로깅과 이 세션의 embedding_client/retrieval_service 변경은 서로 다른
 파일이라 충돌 없었음).
 
+6. **M4(GCP/GCE 배포)가 이미 완료돼 있음을 뒤늦게 발견함** — 15번 항목5는 "Deploy는 매번 GCP
+   인증 단계에서 실패"라고 적었는데, 이건 **그 세션이 확인한 시점(Cloud Run 기반 옛
+   `deploy.yml`) 기준으로는 맞았지만 이후 상황이 바뀜**. push 이력을 `gh run list`로 다시
+   확인해보니, 같은 날 더 뒤에 있었던 `"Rewrite CD as GCE SSH deploy via GHCR, replacing
+   unconfigured Cloud Run"` 커밋(15번엔 인용만 되고 반영은 안 된 변경)부터 `deploy.yml`이
+   Cloud Run이 아니라 **GHCR 이미지 빌드/푸시 → GCE VM SSH 접속 → `docker compose pull && up
+   -d` → 백엔드(`:8001/health`)·프론트(`:80`) 헬스체크** 방식으로 완전히 바뀌어 있었고, 첫
+   시도만 실패한 뒤 이후 이 세션의 push를 포함해 **3번 연속 성공** 중임(`GCE_HOST`/
+   `GCE_USERNAME`/`GCE_SSH_KEY` 시크릿이 이미 설정 완료된 상태로 보임). 즉 **M4는 사실상 완료**
+   — `infra/gcp-setup.md`/`deploy.yml`을 "GCE로 다시 손봐야 함"이라고 했던 아래 7번 목록의
+   오래된 항목은 더 이상 사실이 아님(바로 아래에서 갱신함).
+   ⚠️ 실제 접속 가능한 VM 외부 IP는 `GCE_HOST` 시크릿에만 있고 이 저장소 어디에도 평문으로
+   적혀있지 않음(의도적 — `infra/gcp-setup.md`엔 `<vm-external-ip>` 플레이스홀더만 있음) —
+   발표 때 실제 URL이 필요하면 GitHub 저장소 시크릿이나 `gcloud compute instances list`로
+   직접 확인할 것.
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
@@ -862,8 +878,9 @@ Docker+GCE)의 인프라 패턴을 그대로 재사용하기로 확정함:
    본문 발췌까지 고도화됨).
 3. ~~M3(SOLAR/Gemini 실제 LLM)~~ → **완료** — 사용자 직접 선택 방식으로 최종 확정(9번 참고,
    **벌써 3번째 확정** — 자동 라우팅으로 되돌리기 전에 반드시 9번 전체를 읽을 것).
-4. GCP/GCE 배포(M4)는 아직 전혀 준비 안 됨 — `infra/gcp-setup.md`/`deploy.yml`이 Cloud Run 기준으로
-   작성돼 있어 GCE로 다시 손봐야 함.
+4. ~~GCP/GCE 배포(M4)는 아직 전혀 준비 안 됨~~ → **완료** — `deploy.yml`이 GCE SSH 배포 방식으로
+   재작성됐고(16번 6항 참고), push마다 GHCR 빌드→GCE VM 배포→헬스체크까지 실제로 통과 중.
+   VM 외부 IP는 `GCE_HOST` 시크릿에만 있어 이 문서엔 안 적음.
 5. Supabase/Upstage 키는 이미 `.env`에 채워짐(2026-07-21) — 실제 Supabase 연동 코드는 아직 안 짬.
 6. 정영준님이 프론트를 별도로 더 작업한다면, **2번(2026-07-21 대시보드 UI 전환 재확정)에서
    확정한 대시보드 구조**로 맞춰야 함 — 병합 시 충돌 나면 이 구조가 우선. (8번 병합 당시엔
