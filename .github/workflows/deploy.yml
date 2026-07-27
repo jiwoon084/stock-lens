@@ -1,5 +1,9 @@
 name: Deploy
 
+# GCE + GHCR, not Cloud Run: builds both images, pushes them to GitHub Container Registry, then
+# SSHes into the reused GCE VM (see infra/gcp-setup.md) to pull and restart via
+# infra/gce/docker-compose.yml, which already lives on that VM at ~/stock-lens/docker-compose.yml.
+
 on:
   push:
     branches: [main]
@@ -7,15 +11,11 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+  packages: write
 
 env:
-  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-  GCP_REGION: ${{ vars.GCP_REGION }}
-  GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
-  FRONTEND_SERVICE_NAME: ${{ vars.FRONTEND_SERVICE_NAME }}
-  BACKEND_SERVICE_NAME: ${{ vars.BACKEND_SERVICE_NAME }}
-  BACKEND_PUBLIC_URL: ${{ vars.BACKEND_PUBLIC_URL }}
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/stock-lens-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/stock-lens-frontend
 
 jobs:
   deploy:
@@ -24,58 +24,59 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Requires GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_DEPLOY_SERVICE_ACCOUNT repository
-      # variables to be configured before this workflow can run (see docs/deployment.md).
-      - name: Authenticate to GCP (Workload Identity Federation)
-        uses: google-github-actions/auth@v2
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
 
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          # Relative (same-origin): nginx.conf proxies /api/ to the backend container over the
+          # compose network, so the built SPA should call its own origin, not a baked-in host.
+          build-args: |
+            VITE_API_BASE_URL=
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
 
-      - name: Build backend image
-        run: |
-          docker build \
-            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY }}/backend:${{ github.sha }} \
-            ./backend
+      - name: Deploy to GCE over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USERNAME }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/stock-lens
+            docker compose pull
+            docker compose up -d
+            docker image prune -f
 
-      - name: Push backend image
-        run: |
-          docker push ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY }}/backend:${{ github.sha }}
+            for i in $(seq 1 10); do
+              if curl -sf http://127.0.0.1:8001/health > /dev/null; then
+                echo "Backend healthy"
+                break
+              fi
+              echo "Waiting for backend... ($i)"
+              sleep 5
+              if [ "$i" = "10" ]; then
+                echo "Backend health check failed"
+                exit 1
+              fi
+            done
 
-      - name: Deploy backend to Cloud Run
-        run: |
-          gcloud run deploy ${{ env.BACKEND_SERVICE_NAME }} \
-            --project ${{ env.GCP_PROJECT_ID }} \
-            --region ${{ env.GCP_REGION }} \
-            --image ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY }}/backend:${{ github.sha }} \
-            --service-account ${{ vars.BACKEND_RUNTIME_SERVICE_ACCOUNT }} \
-            --set-env-vars ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }},LLM_PROVIDER=mock \
-            --set-secrets SOLAR_API_KEY=SOLAR_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,DART_API_KEY=DART_API_KEY:latest,KRX_API_KEY=KRX_API_KEY:latest \
-            --allow-unauthenticated \
-            --quiet
-
-      - name: Build frontend image
-        run: |
-          docker build \
-            --build-arg VITE_API_BASE_URL=${{ env.BACKEND_PUBLIC_URL }} \
-            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY }}/frontend:${{ github.sha }} \
-            ./frontend
-
-      - name: Push frontend image
-        run: |
-          docker push ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY }}/frontend:${{ github.sha }}
-
-      - name: Deploy frontend to Cloud Run
-        run: |
-          gcloud run deploy ${{ env.FRONTEND_SERVICE_NAME }} \
-            --project ${{ env.GCP_PROJECT_ID }} \
-            --region ${{ env.GCP_REGION }} \
-            --image ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY }}/frontend:${{ github.sha }} \
-            --allow-unauthenticated \
-            --quiet
+            curl -sf http://127.0.0.1/ > /dev/null && echo "Frontend serving"

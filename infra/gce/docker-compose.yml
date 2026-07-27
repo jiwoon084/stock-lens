@@ -1,0 +1,39 @@
+services:
+  backend:
+    image: ghcr.io/${GHCR_OWNER}/stock-lens-backend:latest
+    restart: unless-stopped
+    ports:
+      # Not exposed on 0.0.0.0 — the GCE firewall only opens port 80 (see ../gcp-setup.md), and
+      # the frontend's nginx proxies /api/ to this container over the compose network. Bound to
+      # loopback only so it's still reachable for debugging directly on the VM.
+      - "127.0.0.1:8001:8080"
+    environment:
+      - PORT=8080
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - LLM_PROVIDER=${LLM_PROVIDER:-solar}
+      - SOLAR_API_KEY=${SOLAR_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DART_API_KEY=${DART_API_KEY:-}
+      - KRX_API_KEY=${KRX_API_KEY:-}
+      - KIS_APP_KEY=${KIS_APP_KEY:-}
+      - KIS_APP_SECRET=${KIS_APP_SECRET:-}
+      - KIS_ACCOUNT_NO=${KIS_ACCOUNT_NO:-}
+    volumes:
+      # Collected data files (disclosures/news/corp codes) are gitignored and never baked into
+      # the image — this directory is placed on the VM once, out of band, and just needs to
+      # persist across deploys. See ../gcp-setup.md.
+      - ./data:/app/data:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/stock-lens-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    depends_on:
+      - backend
