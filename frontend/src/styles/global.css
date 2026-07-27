@@ -8,7 +8,11 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: "Helvetica Neue", Arial, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  font-family: "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic",
+    "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #root {
@@ -225,9 +229,16 @@ body {
   padding: 4px 10px;
   cursor: pointer;
   font-size: 0.8rem;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
-.chart-toolbar__button--active {
+.chart-toolbar__button:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+.chart-toolbar__button--active,
+.chart-toolbar__button--active:hover {
   color: var(--color-text);
   border-color: var(--color-text);
   background: var(--color-surface-muted);
