@@ -38,22 +38,14 @@ export default function App() {
   const [chartWidth, setChartWidth] = useState(0);
   const chartWrapperResizeObserverRef = useRef<ResizeObserver | null>(null);
   // 2차 멘토링 피드백 반영: "차트 클릭 가능"을 첫 방문자에게 명확히 알림. 실제 클릭 한 번
-  // (handleSelectPoint) 또는 닫기 버튼으로 다시 안 뜨게 하고, localStorage로 재방문 시에도 기억.
-  const [hintDismissed, setHintDismissed] = useState(() => {
-    try {
-      return localStorage.getItem("stock-lens-chart-hint-dismissed") === "1";
-    } catch {
-      return false;
-    }
-  });
+  // (handleSelectPoint) 또는 닫기 버튼으로 그 방문 동안은 다시 안 뜨게 함. localStorage로
+  // 영구 기억하게 했더니 사용자가 실제로 새로고침/재방문해보고는 힌트가 계속 안 보이는 걸
+  // 버그로 느낌 — 새로고침·재방문마다 다시 안내가 필요하다는 뜻이라, 페이지를 새로 열 때마다
+  // 다시 보이도록 영속 저장 없이 컴포넌트 상태로만 관리함.
+  const [hintDismissed, setHintDismissed] = useState(false);
 
   function dismissHint() {
     setHintDismissed(true);
-    try {
-      localStorage.setItem("stock-lens-chart-hint-dismissed", "1");
-    } catch {
-      // localStorage unavailable (private mode 등) — 메모리 상태만으로도 이번 세션엔 충분
-    }
   }
 
   // A plain ref + a mount-only effect would miss this node — it doesn't exist yet while

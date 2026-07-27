@@ -5,7 +5,8 @@ interface ChartOnboardingHintProps {
 
 // 2차 멘토링 피드백("차트를 클릭하면 상세 정보를 볼 수 있다는 점을 명확히 알려줄 필요가 있다")
 // 반영 — 기존엔 상단 태그라인/차트 아래 보조 텍스트뿐이라 눈에 잘 안 띄었음. 첫 방문자에게만
-// 보이는 배너로 승격하고, 실제로 클릭하는 순간(App.tsx) 또는 닫기 버튼으로 다시 안 뜨게 함.
+// 보이는 배너로 승격하고, 실제로 클릭하는 순간(App.tsx) 또는 닫기 버튼으로 그 방문 동안은
+// 다시 안 뜨게 함 — 새로고침/재방문하면 다시 보임(영구 dismiss 아님, App.tsx 참고).
 export function ChartOnboardingHint({ visible, onDismiss }: ChartOnboardingHintProps) {
   if (!visible) return null;
 
