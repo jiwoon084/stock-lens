@@ -1,11 +1,13 @@
 # infra
 
-This folder holds GCP-side setup notes and Cloud Run environment references. It does not
-contain Terraform or any other infrastructure-as-code — resources are created manually or via
-`gcloud`, following [gcp-setup.md](./gcp-setup.md) and [../docs/deployment.md](../docs/deployment.md).
+This folder holds the GCE deployment setup: a reused VM (from an earlier course project) running
+both containers via Docker Compose, not Cloud Run. See [gcp-setup.md](./gcp-setup.md) for the
+one-time setup and [../docs/deployment.md](../docs/deployment.md) for the full reasoning.
 
-- `gcp-setup.md` — one-time GCP project setup (APIs, Artifact Registry, Workload Identity
-  Federation, Secret Manager).
-- `cloud-run/` — example environment variable files for each Cloud Run service. These are
-  references for what to configure in the Cloud Run console / `gcloud run deploy`, not files
-  consumed automatically by any script.
+- `gcp-setup.md` — one-time VM setup (placing the compose file/`.env`/data, registering GitHub
+  Secrets, making the GHCR packages public).
+- `gce/docker-compose.yml` — the actual file that lives on the VM at
+  `~/stock-lens/docker-compose.yml`; `deploy.yml` only runs `docker compose pull && up -d`
+  against it over SSH.
+- `gce/.env.example` — shape of the `.env` that lives alongside it on the VM (placeholders only;
+  real values are placed on the VM directly, never committed or passed through CI).

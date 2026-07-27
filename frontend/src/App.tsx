@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ChartOnboardingHint } from "./features/price-chart/ChartOnboardingHint";
 import { ChartToolbar, filterPricesByPeriod, type ChartPeriod } from "./features/price-chart/ChartToolbar";
 import { ChartTypeToggle, type ChartType } from "./features/price-chart/ChartTypeToggle";
 import { PriceChart, type ChartCoordinate } from "./features/price-chart/PriceChart";
@@ -26,7 +27,7 @@ import type { PricePoint } from "./shared/types/stock";
 
 export default function App() {
   const [ticker, setTicker] = useState("005930");
-  const [period, setPeriod] = useState<ChartPeriod>("all");
+  const [period, setPeriod] = useState<ChartPeriod>("1m");
   const [chartType, setChartType] = useState<ChartType>("candle");
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("solar");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
@@ -35,8 +36,19 @@ export default function App() {
   // date, so picking a different minute after dismissing the popover would never bring it back.
   const [selectedIntradayIso, setSelectedIntradayIso] = useState<string | null>(null);
   const [pointCoordinate, setPointCoordinate] = useState<ChartCoordinate | null>(null);
+  const [hoverCoordinate, setHoverCoordinate] = useState<ChartCoordinate | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
   const chartWrapperResizeObserverRef = useRef<ResizeObserver | null>(null);
+  // 2차 멘토링 피드백 반영: "차트 클릭 가능"을 첫 방문자에게 명확히 알림. 실제 클릭 한 번
+  // (handleSelectPoint) 또는 닫기 버튼으로 그 방문 동안은 다시 안 뜨게 함. localStorage로
+  // 영구 기억하게 했더니 사용자가 실제로 새로고침/재방문해보고는 힌트가 계속 안 보이는 걸
+  // 버그로 느낌 — 새로고침·재방문마다 다시 안내가 필요하다는 뜻이라, 페이지를 새로 열 때마다
+  // 다시 보이도록 영속 저장 없이 컴포넌트 상태로만 관리함.
+  const [hintDismissed, setHintDismissed] = useState(false);
+
+  function dismissHint() {
+    setHintDismissed(true);
+  }
 
   // A plain ref + a mount-only effect would miss this node — it doesn't exist yet while
   // pricesLoading is true, so it only appears after the initial render. A callback ref fires
@@ -82,6 +94,7 @@ export default function App() {
   function handleSelectPoint(point: PricePoint) {
     setSelectedPoint(point);
     setSelectedIntradayIso(null);
+    dismissHint();
     void explain(ticker, point.time, "1d", llmProvider);
     void analyze(ticker, point.time);
   }
@@ -124,6 +137,15 @@ export default function App() {
     document.getElementById(`source-${sourceId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  function handleChartMouseMove(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setHoverCoordinate({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  }
+
+  function handleChartMouseLeave() {
+    setHoverCoordinate(null);
+  }
+
   return (
     <TermPopoverProvider>
       <div className="page">
@@ -153,11 +175,17 @@ export default function App() {
               actions={<ChartToolbar period={period} onChangePeriod={setPeriod} />}
             >
               {pricesError && <div className="error-banner">{pricesError}</div>}
+              <ChartOnboardingHint visible={!hintDismissed && !selectedPoint} onDismiss={dismissHint} />
               {pricesLoading ? (
                 <LoadingSpinner label="가격 데이터를 불러오는 중입니다..." />
               ) : (
                 <>
-                  <div className="price-chart__wrapper" ref={chartWrapperRef}>
+                  <div
+                    className="price-chart__wrapper"
+                    ref={chartWrapperRef}
+                    onMouseMove={handleChartMouseMove}
+                    onMouseLeave={handleChartMouseLeave}
+                  >
                     <PriceChart
                       prices={visiblePrices}
                       intradayPrices={intradayPrices}
@@ -168,6 +196,20 @@ export default function App() {
                       onSelectIntradayPoint={handleSelectIntradayPoint}
                       onSelectedPointCoordinate={setPointCoordinate}
                     />
+                    {!selectedPoint && hoverCoordinate && (
+                      <div
+                        className="chart-hover-hint"
+                        aria-hidden="true"
+                        style={{
+                          top: Math.max(8, hoverCoordinate.y - 32),
+                          ...(chartWidth > 0 && hoverCoordinate.x > chartWidth / 2
+                            ? { right: Math.max(8, chartWidth - hoverCoordinate.x + 12) }
+                            : { left: hoverCoordinate.x + 12 }),
+                        }}
+                      >
+                        차트를 클릭하면 주가 변동 원인 후보와 오늘의 체크리스트가 보여요
+                      </div>
+                    )}
                     <ChartMovementPopover
                       status={analysisStatus}
                       items={analysisData?.analysis.detail_panel.why_it_moved ?? []}

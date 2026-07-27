@@ -1,10 +1,14 @@
-"""LangGraph nodes for the stock-analysis pipeline (POST /api/analysis/date).
+"""LangGraph nodes for the stock-analysis Agent (POST /api/analysis/date).
 
 Each node is a thin wrapper around the existing, independently-tested helpers in
 app/services/stock_analysis_service.py — this module adds explicit graph structure, not new
 business logic. The helpers stay defined there (not duplicated here) so the existing unit
 tests that call them directly (e.g. `stock_analysis_service._sanitize_result(...)` in
 backend/tests/test_stock_analysis_service.py) keep working unchanged.
+
+Reaches market data and evidence retrieval only through app/gateway/data_gateway.py, never by
+importing app.services.market_data_service / app.services.retrieval_service directly — that
+Gateway module is the one seam between this Agent and the outside world (see its docstring).
 
 Imports `app.services.stock_analysis_service` at module load time. That module only imports
 this graph back via a *local* import inside `analyze_date()` (not at its own top level) —
@@ -14,9 +18,9 @@ otherwise this would be a circular import. See app/agent/graph.py's docstring.
 from datetime import date
 
 from app.agent.state import AnalysisGraphState
+from app.gateway import data_gateway
 from app.rules.watch_item_templates import generate_allowed_watch_items
 from app.schemas.stock_analysis import LLMInputContext
-from app.services import market_data_service, retrieval_service
 from app.services import stock_analysis_service as sas
 
 
@@ -32,14 +36,14 @@ def fetch_market_data(state: AnalysisGraphState) -> dict:
     ticker = state["ticker"]
     selected_date = state["selected_date"]
 
-    stock = market_data_service.get_stock(ticker)
+    stock = data_gateway.get_stock(ticker)
     if stock is None:
         raise TickerNotFoundError(ticker)
 
     # get_price_series_with_live_today (not plain get_price_series): "오늘" is never in the
     # official daily series yet (KRX EOD lags a day) — this synthesizes today's row from the
     # live KIS quote so analysis works from the intraday tab too. See market_data_service.py.
-    prices = market_data_service.get_price_series_with_live_today(ticker)
+    prices = data_gateway.get_price_series_with_live_today(ticker)
     index = next((i for i, p in enumerate(prices) if p.time == selected_date), None)
     if index is None:
         raise DateNotFoundError(selected_date)
@@ -62,7 +66,7 @@ def fetch_market_data(state: AnalysisGraphState) -> dict:
 
 
 def retrieve_evidence(state: AnalysisGraphState) -> dict:
-    retrieved = retrieval_service.get_related_documents(
+    retrieved = data_gateway.get_related_documents(
         ticker=state["ticker"], selected_date=state["selected_date"], direction=state["direction"]
     )
     return {

@@ -1,131 +1,101 @@
 # Deployment
 
-`.github/workflows/deploy.yml` cannot run successfully yet — it needs a GCP project and GitHub
-repository variables that don't exist by default. This document lists what to set up once,
-and the order to do it in. Command reference lives in `infra/gcp-setup.md`.
+`.github/workflows/deploy.yml` builds both Docker images, pushes them to GitHub Container
+Registry (GHCR), then SSHes into a GCE VM to pull and restart them via
+`infra/gce/docker-compose.yml`. Not Cloud Run — the team decided early on to reuse the GCE VM
+from a previous course project (MathMate) rather than stand up Cloud Run + Workload Identity
+Federation, but `deploy.yml` stayed Cloud Run boilerplate for a while before this was actually
+implemented. Command reference lives in `infra/gcp-setup.md`.
 
-## 1. Enable GCP APIs
+## 1. The VM
 
-```bash
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com \
-  iamcredentials.googleapis.com secretmanager.googleapis.com --project "$GCP_PROJECT_ID"
-```
+One VM (`ai-assistant`, `asia-northeast3-c`) already runs one other course project's container
+(`lumi-agent`, bound to host port 8000) — this deploy must not collide with that. Docker and the
+Compose plugin are already installed on it (reused from that project).
 
-## 2. Create the Artifact Registry repository
+**Firewall**: only port 80 (HTTP), port 8000 (already used by `lumi-agent`), and 22 (SSH) are
+open — confirmed empirically (`curl` to 80 gets "connection refused" = firewall lets the packet
+through but nothing's listening yet; `curl` to 8001/443 times out = firewall drops it). This
+project's backend is therefore **not exposed on its own port at all** — see "Single port,
+proxied" below.
 
-One Docker repository holds both images (`backend`, `frontend`), tagged by name inside it:
+## 2. Single port, proxied (not two open ports)
 
-```bash
-gcloud artifacts repositories create stock-lens --repository-format=docker \
-  --location="$GCP_REGION" --project "$GCP_PROJECT_ID"
-```
+Because only port 80 is open, the two services can't each get their own external port the way
+the local `compose.yaml` does. Instead:
 
-## 3. Reserve the two Cloud Run services
+- The backend container binds `127.0.0.1:8001:8080` on the VM — reachable only from the VM
+  itself (for the health check step in `deploy.yml`, or manual debugging over SSH), never from
+  the internet.
+- The frontend image is built with `VITE_API_BASE_URL=` (empty/relative) instead of a real host,
+  so the SPA calls `/api/...` on its own origin. `frontend/nginx.conf` proxies `location /api/`
+  to `http://backend:8080` over the Compose network. One public port, no CORS to configure
+  (same-origin), and the backend is never directly reachable from outside the VM.
 
-`stock-lens-web` and `stock-lens-api` are created by the first successful `gcloud run deploy`
-in `deploy.yml` — there's no separate manual creation step, but the service account running
-the deploy needs `roles/run.admin` in advance.
+## 3. `infra/gce/docker-compose.yml` and its `.env`
 
-## 4. Set up Workload Identity Federation
+This file lives on the VM at `~/stock-lens/docker-compose.yml` — it's the same file committed
+here, not something `deploy.yml` generates. `deploy.yml` only ever runs `docker compose pull &&
+docker compose up -d` against it over SSH; it doesn't write or edit it.
 
-No service account JSON key is ever created or stored. Instead:
+It reads a `~/stock-lens/.env` on the VM (see `infra/gce/.env.example` for the shape) for the
+non-secret `GHCR_OWNER`/`ALLOWED_ORIGINS`/`LLM_PROVIDER` and the actual API keys
+(`SOLAR_API_KEY`, `GEMINI_API_KEY`, `DART_API_KEY`, `KRX_API_KEY`, `KIS_APP_KEY`,
+`KIS_APP_SECRET`, `KIS_ACCOUNT_NO`). This `.env` is placed on the VM once, out of band (scp from
+a local `.env` that already has real values) — `deploy.yml` never touches it, so rotating a key
+means editing it on the VM and restarting the containers, not pushing to GitHub.
 
-1. Create a Workload Identity Pool and an OIDC provider trusted for this specific GitHub repo
-   (restrict to `repository == "<org>/stock-lens"` at minimum).
-2. Create a deploy service account (e.g. `stock-lens-deployer@$GCP_PROJECT_ID.iam.gserviceaccount.com`)
-   with `roles/run.admin`, `roles/artifactregistry.writer`, and `roles/iam.serviceAccountUser`
-   (to act as the backend runtime service account below).
-3. Allow the Workload Identity provider to impersonate that service account.
-4. Note the full provider resource name and service account email — they become
-   `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SERVICE_ACCOUNT` below.
+**Known gap, same as before**: `backend/Dockerfile` only copies `app/` — `data/disclosures.json`
+etc. aren't baked into the image. `docker-compose.yml` mounts `./data:/app/data:ro` from the
+VM's `~/stock-lens/data/`, which (like `.env`) is placed on the VM once, out of band (`scp` the
+local `data/*.json` files up) and persists across deploys — `deploy.yml` doesn't touch it either.
+Refreshing this data (e.g. after re-running `data/step2_disclosures.py` locally) is a manual
+`scp` for now.
 
-## 5. Create a backend runtime service account + Secret Manager secrets
+## 4. GHCR image visibility
 
-```bash
-gcloud iam service-accounts create stock-lens-api-runtime --project "$GCP_PROJECT_ID"
+`deploy.yml` authenticates to GHCR with the ephemeral `GITHUB_TOKEN` to *push* images — that
+works automatically, no setup needed. But the VM needs to *pull* them too, and giving the VM its
+own long-lived registry credential is one more secret to manage. Simpler: once the first push
+creates the `stock-lens-backend`/`stock-lens-frontend` packages, set their visibility to
+**Public** in GitHub → your profile → Packages → (each package) → Package settings. They're just
+built artifacts (no secrets baked in — API keys are injected at container runtime via `.env`,
+never at image-build time), so there's no real exposure from this.
 
-printf '%s' "$SOLAR_API_KEY" | gcloud secrets create SOLAR_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
-printf '%s' "$GEMINI_API_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
-printf '%s' "$DART_API_KEY" | gcloud secrets create DART_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
-printf '%s' "$KRX_API_KEY" | gcloud secrets create KRX_API_KEY --data-file=- --project "$GCP_PROJECT_ID"
+## 5. GitHub repository Secrets
 
-gcloud secrets add-iam-policy-binding SOLAR_API_KEY \
-  --member="serviceAccount:stock-lens-api-runtime@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor" --project "$GCP_PROJECT_ID"
-# repeat for GEMINI_API_KEY, DART_API_KEY, and KRX_API_KEY
-```
+Set these under Settings → Secrets and variables → Actions → **Secrets**:
 
-Real keys are never committed — only `SOLAR_API_KEY=` / `GEMINI_API_KEY=` / `DART_API_KEY=` /
-`KRX_API_KEY=` placeholders exist in `.env.example`, and `deploy.yml` injects them via
-`--set-secrets`, not plain env vars.
-
-**All four are actually used today** — `DART_API_KEY`/`KRX_API_KEY` for real disclosures/prices
-(`app/services/retrieval_service.py`, `app/services/krx_price_client.py`), and
-`SOLAR_API_KEY`/`GEMINI_API_KEY` for the real SOLAR/Gemini call the frontend's
-`LlmProviderToggle` picks per-request in `app/services/llm_service.py` (M3, see
-`docs/project-plan.md`; CLAUDE.md section 9 — not automatic routing, don't "fix" this without
-reading that section first). Every one of them degrades gracefully if missing:
-`/api/v1/explanations` falls back to a rule-based/mock response, `/api/v1/stocks/{ticker}/prices`
-falls back to mock prices — nothing 500s on a missing key. The newer `POST /api/analysis/date`
-(CLAUDE.md section 10) reuses the same `SOLAR_API_KEY`/`GEMINI_API_KEY` secrets but picks a
-provider from env var `LLM_PROVIDER` instead of a per-request field.
-
-**Known gap**: `backend/Dockerfile` only copies `app/` into the image — `data/disclosures.json`
-(the DART snapshot) is not baked in, and there's no volume mount in production the way
-`compose.yaml` mounts `./data` locally. Until that's addressed, a Cloud Run deploy of the
-current backend will have `DART_API_KEY` working for live per-request calls (document body,
-structured events) but no disclosure *list* to rank against, so it'll behave like the "no
-related disclosures found" case for every request. Decide how the snapshot ships (bake into the
-image at build time, a mounted volume/GCS bucket, or move list-fetching to be live too) before
-relying on this in a real deployment.
-
-## 6. GitHub Repository Variables
-
-Set these under Settings → Secrets and variables → Actions → **Variables** (not Secrets —
-none of these are credentials; auth is via WIF):
-
-| Variable | Example |
+| Secret | Value |
 |---|---|
-| `GCP_PROJECT_ID` | `stock-lens-prod` |
-| `GCP_REGION` | `asia-northeast3` |
-| `GCP_ARTIFACT_REPOSITORY` | `stock-lens` |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/123/locations/global/workloadIdentityPools/gh/providers/gh-provider` |
-| `GCP_DEPLOY_SERVICE_ACCOUNT` | `stock-lens-deployer@stock-lens-prod.iam.gserviceaccount.com` |
-| `FRONTEND_SERVICE_NAME` | `stock-lens-web` |
-| `BACKEND_SERVICE_NAME` | `stock-lens-api` |
-| `BACKEND_PUBLIC_URL` | `https://stock-lens-api-xxxxx.a.run.app` |
-| `BACKEND_RUNTIME_SERVICE_ACCOUNT` | `stock-lens-api-runtime@stock-lens-prod.iam.gserviceaccount.com` |
-| `ALLOWED_ORIGINS` | `https://stock-lens-web-xxxxx.a.run.app` |
+| `GCE_HOST` | the VM's external IP (changes if the VM is ever recreated, not just stopped/started — see `.env`'s comment) |
+| `GCE_USERNAME` | SSH username on the VM |
+| `GCE_SSH_KEY` | private key matching a public key already in the VM's `~/.ssh/authorized_keys` |
 
-## 7. First deploy order
+That's the entire secret surface `deploy.yml` needs — no GCP service account, no Workload
+Identity Federation, no Artifact Registry. The API keys live only in the VM's own `.env` (§3),
+never in GitHub.
 
-`BACKEND_PUBLIC_URL` doesn't exist until the backend has deployed once, and frontend build
-needs it as a build arg. So the very first deploy is a two-pass process:
+## 6. First-time VM setup (once, out of band — not automated)
 
-1. Run `deploy.yml` once (`workflow_dispatch` is fine) with `BACKEND_PUBLIC_URL` left blank or
-   pointed at a placeholder — this creates `stock-lens-api` and prints its real `*.a.run.app` URL.
-2. Set `BACKEND_PUBLIC_URL` to that real URL, and update backend's `ALLOWED_ORIGINS` variable
-   to the frontend's real URL once it exists (same chicken-and-egg — frontend URL is also only
-   known after its first deploy).
-3. Re-run `deploy.yml`. From then on, every push to `main` redeploys both with the same URLs.
+1. Confirm Docker + Compose plugin are on the VM (`docker --version && docker compose version`).
+2. `mkdir -p ~/stock-lens/data` on the VM.
+3. `scp` `infra/gce/docker-compose.yml` to `~/stock-lens/docker-compose.yml`.
+4. `scp` a real `.env` (based on `infra/gce/.env.example`, with actual keys) to
+   `~/stock-lens/.env`.
+5. `scp` the local `data/*.json` files to `~/stock-lens/data/`.
+6. Make the two GHCR packages public (§4) after the first `deploy.yml` run creates them.
+7. Push to `main` (or run `deploy.yml` via `workflow_dispatch`).
 
-## 8. CORS
+## 7. Rollback
 
-The backend reads `ALLOWED_ORIGINS` (comma-separated) at startup (`app/core/config.py`) and
-passes it to `CORSMiddleware`. Locally this is `http://localhost:5173`. In Cloud Run it must be
-the frontend's `*.a.run.app` URL — a mismatch here is the most common cause of a working
-`curl` but a broken browser fetch.
-
-## 9. Rollback
-
-Cloud Run keeps every revision. To roll back:
+Images are tagged with both `:latest` and `:${{ github.sha }}`. To roll back, SSH in and:
 
 ```bash
-gcloud run services update-traffic stock-lens-api --to-revisions=<previous-revision>=100 \
-  --region "$GCP_REGION" --project "$GCP_PROJECT_ID"
+cd ~/stock-lens
+docker compose pull  # or edit docker-compose.yml to pin an old :<sha> tag temporarily
+docker compose up -d
 ```
 
-Because images are tagged with `${{ github.sha }}`, redeploying an old commit's image is also
-just `gcloud run deploy <service> --image ...backend:<old-sha>`. There is no automated
-rollback step in `deploy.yml` — it's a manual `gcloud` command until that's needed often
-enough to script.
+There's no automated rollback step in `deploy.yml` — manual, same reasoning as the old Cloud Run
+doc: not worth scripting until it's needed often enough to hurt.

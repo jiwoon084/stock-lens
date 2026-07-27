@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { fetchMovementExplanation } from "../../shared/api/explanations";
 import { ApiError } from "../../shared/api/client";
@@ -18,9 +18,13 @@ export function useMovementExplanation(): UseMovementExplanationResult {
   const [status, setStatus] = useState<ExplanationStatus>("idle");
   const [data, setData] = useState<MovementExplanationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Same stale-response guard as useStockAnalysis: a slower request for an older date/provider
+  // must not clobber a newer one that already resolved.
+  const requestIdRef = useRef(0);
 
   const explain = useCallback(
     async (ticker: string, selectedDate: string, interval: string, llmProvider: LlmProvider) => {
+      const requestId = ++requestIdRef.current;
       setStatus("loading");
       setError(null);
 
@@ -31,9 +35,11 @@ export function useMovementExplanation(): UseMovementExplanationResult {
           interval,
           llm_provider: llmProvider,
         });
+        if (requestIdRef.current !== requestId) return;
         setData(response);
         setStatus("success");
       } catch (err) {
+        if (requestIdRef.current !== requestId) return;
         const message =
           err instanceof ApiError
             ? `분석 요청이 실패했습니다. (${err.status})`
@@ -46,6 +52,7 @@ export function useMovementExplanation(): UseMovementExplanationResult {
   );
 
   const reset = useCallback(() => {
+    requestIdRef.current++;
     setStatus("idle");
     setData(null);
     setError(null);
