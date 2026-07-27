@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ChartOnboardingHint } from "./features/price-chart/ChartOnboardingHint";
 import { ChartToolbar, filterPricesByPeriod, type ChartPeriod } from "./features/price-chart/ChartToolbar";
 import { ChartTypeToggle, type ChartType } from "./features/price-chart/ChartTypeToggle";
 import { PriceChart, type ChartCoordinate } from "./features/price-chart/PriceChart";
@@ -36,6 +37,24 @@ export default function App() {
   const [pointCoordinate, setPointCoordinate] = useState<ChartCoordinate | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
   const chartWrapperResizeObserverRef = useRef<ResizeObserver | null>(null);
+  // 2차 멘토링 피드백 반영: "차트 클릭 가능"을 첫 방문자에게 명확히 알림. 실제 클릭 한 번
+  // (handleSelectPoint) 또는 닫기 버튼으로 다시 안 뜨게 하고, localStorage로 재방문 시에도 기억.
+  const [hintDismissed, setHintDismissed] = useState(() => {
+    try {
+      return localStorage.getItem("stock-lens-chart-hint-dismissed") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function dismissHint() {
+    setHintDismissed(true);
+    try {
+      localStorage.setItem("stock-lens-chart-hint-dismissed", "1");
+    } catch {
+      // localStorage unavailable (private mode 등) — 메모리 상태만으로도 이번 세션엔 충분
+    }
+  }
 
   // A plain ref + a mount-only effect would miss this node — it doesn't exist yet while
   // pricesLoading is true, so it only appears after the initial render. A callback ref fires
@@ -81,6 +100,7 @@ export default function App() {
   function handleSelectPoint(point: PricePoint) {
     setSelectedPoint(point);
     setSelectedIntradayIso(null);
+    dismissHint();
     void explain(ticker, point.time, "1d", llmProvider);
     void analyze(ticker, point.time);
   }
@@ -149,6 +169,7 @@ export default function App() {
               actions={<ChartToolbar period={period} onChangePeriod={setPeriod} />}
             >
               {pricesError && <div className="error-banner">{pricesError}</div>}
+              <ChartOnboardingHint visible={!hintDismissed && !selectedPoint} onDismiss={dismissHint} />
               {pricesLoading ? (
                 <LoadingSpinner label="가격 데이터를 불러오는 중입니다..." />
               ) : (
