@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.rate_limit import enforce_rate_limit
 from app.schemas.explanation import MovementExplanationRequest, MovementExplanationResponse
 from app.services import explanation_service
 
 router = APIRouter(prefix="/api/v1/explanations", tags=["explanations"])
 
 
-@router.post("", response_model=MovementExplanationResponse)
+@router.post("", response_model=MovementExplanationResponse, dependencies=[Depends(enforce_rate_limit)])
 def create_explanation(request: MovementExplanationRequest) -> MovementExplanationResponse:
     try:
         return explanation_service.explain_movement(request)

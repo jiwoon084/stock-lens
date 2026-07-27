@@ -11,12 +11,19 @@ from app.core.config import settings
 # stock_analysis_service.py, which is most of what backs the "we monitor LLM calls" claim.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="Stock Lens API")
+app = FastAPI(
+    title="Stock Lens API",
+    docs_url="/docs" if settings.enable_api_docs else None,
+    redoc_url="/redoc" if settings.enable_api_docs else None,
+    openapi_url="/openapi.json" if settings.enable_api_docs else None,
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
-    allow_credentials=True,
+    # No cookie/session auth anywhere in this app, so there's nothing for credentialed
+    # cross-origin requests to carry — off by default rather than left on unnecessarily.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

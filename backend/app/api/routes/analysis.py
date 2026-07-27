@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.rate_limit import enforce_rate_limit
 from app.schemas.stock_analysis import StockAnalysisRequest, StockAnalysisResponse
 from app.services import stock_analysis_service
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
 
-@router.post("/date", response_model=StockAnalysisResponse)
+@router.post("/date", response_model=StockAnalysisResponse, dependencies=[Depends(enforce_rate_limit)])
 def analyze_date(request: StockAnalysisRequest) -> StockAnalysisResponse:
     try:
         return stock_analysis_service.analyze_date(request.ticker, request.selected_date)

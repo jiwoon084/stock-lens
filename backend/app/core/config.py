@@ -13,6 +13,10 @@ class Settings(BaseSettings):
 
     port: int = 8080
     allowed_origins: str = "http://localhost:5173"
+    # Swagger UI/ReDoc/OpenAPI schema are handy locally but leak the full API surface to anyone
+    # who finds the deployed URL, with no auth in front of them — default on for local dev
+    # convenience, set to false via the deployed .env (see infra/gce/.env.example).
+    enable_api_docs: bool = True
 
     solar_api_key: str = ""
     gemini_api_key: str = ""

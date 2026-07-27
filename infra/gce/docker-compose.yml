@@ -10,6 +10,7 @@ services:
     environment:
       - PORT=8080
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - ENABLE_API_DOCS=${ENABLE_API_DOCS:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-solar}
       - SOLAR_API_KEY=${SOLAR_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
