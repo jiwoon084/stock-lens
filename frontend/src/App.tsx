@@ -26,7 +26,7 @@ import type { PricePoint } from "./shared/types/stock";
 
 export default function App() {
   const [ticker, setTicker] = useState("005930");
-  const [period, setPeriod] = useState<ChartPeriod>("all");
+  const [period, setPeriod] = useState<ChartPeriod>("1m");
   const [chartType, setChartType] = useState<ChartType>("candle");
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("solar");
   const [selectedPoint, setSelectedPoint] = useState<PricePoint | null>(null);
@@ -177,6 +177,11 @@ export default function App() {
                       onSelectIntradayPoint={handleSelectIntradayPoint}
                       onSelectedPointCoordinate={setPointCoordinate}
                     />
+                    {!selectedPoint && (
+                      <div className="chart-hover-hint" aria-hidden="true">
+                        차트를 클릭하면 주가 변동 원인 후보와 오늘의 체크리스트가 보여요
+                      </div>
+                    )}
                     <ChartMovementPopover
                       status={analysisStatus}
                       items={analysisData?.analysis.detail_panel.why_it_moved ?? []}
