@@ -1,4 +1,9 @@
-"""Common interface for stock-analysis LLM providers.
+"""Common interface for stock-analysis LLM providers — this plus factory.py's get_provider()
+is the LLM-side Gateway: the stock-analysis Agent (app/agent/nodes.py, via
+stock_analysis_service._generate_result) always calls generate() through this interface and
+never talks to solar_provider.py/gemini_provider.py directly. Same role as
+app/gateway/data_gateway.py plays for market data and evidence retrieval — see that module's
+docstring for why a named Gateway seam exists at all.
 
 Kept separate from app/services/llm_service.py + solar_client.py/gemini_client.py, which
 serve the older /api/v1/explanations movement-explanation feature and its user-selectable

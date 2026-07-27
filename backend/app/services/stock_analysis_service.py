@@ -363,14 +363,13 @@ def _generate_result(llm_input: LLMInputContext, provider_name: str | None) -> S
 
 
 def analyze_date(ticker: str, selected_date: str, llm_provider: str | None = None) -> StockAnalysisResponse:
-    # Local import: app.agent.nodes imports this module, so importing the graph at this
-    # module's top level would be circular — see app/agent/graph.py's docstring.
-    from app.agent.graph import get_graph
+    # Local import: app.agent.nodes imports this module, so importing the orchestrator/graph at
+    # this module's top level would be circular — see app/agent/graph.py's docstring.
     from app.agent.nodes import DateNotFoundError, TickerNotFoundError
+    from app.agent.orchestrator import run_analysis
 
-    graph = get_graph()
     try:
-        final_state = graph.invoke({"ticker": ticker, "selected_date": selected_date, "llm_provider": llm_provider})
+        final_state = run_analysis(ticker, selected_date, llm_provider)
     except TickerNotFoundError as exc:
         raise UnknownTickerError(f"Unknown ticker: {ticker}") from exc
     except DateNotFoundError as exc:

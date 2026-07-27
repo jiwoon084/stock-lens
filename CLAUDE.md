@@ -678,6 +678,56 @@ graceful fallback) — 77개 전체 통과. 실제 API로 SK하이닉스 7/23 �
 데이터(1년치)는 여전히 공식 KRX API가 유일한 소스. KIS 데이터로 전체 과거 시세를 대체하지
 않음(공식 API가 이미 잘 커버하고 있고, "공식 데이터 기반"이라는 발표 문구를 유지하고 싶어서).
 
+## 15. 2차 멘토링 피드백 반영 (2026-07-27)
+
+2차 멘토링 보고서(사용자가 pdf로 전달)의 피드백 중 코드로 반영 가능한 항목들을 하나씩 순서대로
+작업함(사용자 요청: "차근차근 하나씩 수행하고 나한테 보고해"). 각 항목은 별도 커밋.
+
+1. **온보딩 힌트 추가(사용성 피드백)**: 처음 방문 시 차트가 클릭 가능하다는 걸 모를 수 있다는
+   지적 → `frontend/src/features/price-chart/ChartOnboardingHint.tsx` 신규(차트 카드 안, 닫기
+   가능한 배너). 처음엔 닫으면 `localStorage`로 영구 기억하게 했었는데, 사용자가 직접 테스트해
+   보고 "새로고침하거나 주소 치고 다시 들어가니까 안 보인다"고 버그로 지적함 — 첫 방문 안내
+   배너가 재방문 때마다 계속 숨어있는 건 의도와 안 맞다고 판단해 **영속 저장 없이 컴포넌트
+   상태로만 관리**하도록 되돌림(그 방문 동안만 닫힘 유지, 새로고침/재방문하면 다시 보임).
+2. **UI/폰트 폴리시**: 폰트를 기존 "Helvetica Neue, Malgun Gothic" 스택에서 **Pretendard
+   Variable**(jsdelivr CDN, 로드 실패 시 기존 시스템 폰트로 자동 폴백)로 교체. 기간 탭 버튼
+   (`.chart-toolbar__button`)에 빠져있던 hover 상태를 다른 토글 버튼들과 일관되게 추가.
+3. **핵심 기능(주가 변동 원인 분석) 안정화**: 실제 재현되는 레이스 컨디션 버그 발견·수정 —
+   `useStockAnalysis`/`useMovementExplanation` 둘 다 클릭마다 비동기 요청(분석 쪽은 LLM 호출로
+   몇 초 걸림)을 새로 날리는데 요청 순서를 추적하지 않아서, 빠르게 여러 날짜를 연달아 클릭하면
+   **먼저 보낸 느린 요청이 나중에 보낸 요청 결과를 덮어써 엉뚱한 날짜의 분석이 뜰 수 있었음**.
+   두 훅 다 요청 카운터(`requestIdRef`)를 추가해 최신 요청만 상태를 반영하도록 고침(`reset()`도
+   카운터를 올려서 티커 전환 중 응답이 새는 것도 막음). 그 외 외부 API 호출(KIS/KRX/SOLAR/
+   Gemini/DART)엔 이미 전부 명시적 timeout이 있고, 알 수 없는 종목/날짜에 대해 500이 아니라
+   404/400으로 정상 응답하는 것도 재확인함 — 추가로 고칠 게 없었음.
+4. **Agent + Gateway + Orchestrator 아키텍처 (MCP는 이번엔 보류)**: 원래 요청은 "MCP만 적용하는
+   게 아니라 교수 요구대로 Agent/Gateway/Orchestrator까지 구현"이었으나, 구현 범위를 물었을 때
+   사용자가 **"권장 수준"(기존 LangGraph 파이프라인을 용어에 맞게 재구성 — 새 인프라 추가 없이
+   이름·경계만 부여)을 선택**하고 실제 MCP 서버 연결 옵션은 고르지 않음 — 그래서 이번엔 MCP는
+   보류하고 세 컴포넌트만 구현함(작업량 대비 발표 가치 판단 기준은 12번의 MCP 보류 결정과 동일한
+   맥락). 실제 변경:
+   - **Agent**: 기존 `app/agent/`(LangGraph 4-노드: fetch_market_data→retrieve_evidence→
+     build_llm_input→generate_analysis)를 그대로 Agent로 지정 — 코드 변경 없음, 문서만.
+   - **Gateway (신규)**: `app/gateway/data_gateway.py` — `nodes.py`가 더 이상
+     `market_data_service`/`retrieval_service`를 직접 import하지 않고, 이 게이트웨이의
+     `get_stock`/`get_price_series_with_live_today`/`get_related_documents`를 통해서만 호출.
+     지금은 순수 pass-through(동작 변화 없음)지만, 로깅/재시도/데이터 소스 교체를 나중에 붙일
+     단일 지점이 생긴 것. LLM 쪽은 이미 `app/services/llm/base.py`(`LLMProvider` 인터페이스)+
+     `factory.py`(provider 선택)가 SOLAR/Gemini를 감추는 동일한 역할을 하고 있었음을 그대로
+     "LLM Gateway"로 문서화(코드 변경 없음, docstring만 추가).
+   - **Orchestrator (신규)**: `app/agent/orchestrator.py` — `run_analysis(ticker, selected_date,
+     llm_provider)` 하나만 노출. `graph.py`의 컴파일된 StateGraph가 이미 하던 일(단계 순서
+     조정 + 상태 전달)에 이름과 단일 호출 지점을 부여한 것. `stock_analysis_service.analyze_date()`
+     가 이제 `get_graph().invoke(...)` 대신 이 `run_analysis()`를 호출하도록 변경.
+   - 검증: 백엔드 테스트 83개 전부 통과(기존 테스트가 `market_data_service`/`retrieval_service`를
+     직접 patch하는 방식 그대로 통과함 — `data_gateway.py`가 매 호출 시점에 모듈 속성을 조회해서
+     호출하기 때문), 서버 재기동 후 `/api/analysis/date` 실제 호출로 정상 경로/에러 경로(미지의
+     종목 → 404) 둘 다 새 Gateway/Orchestrator 코드 경로로 종단 검증함.
+   - 발표 아키텍처 다이어그램에 쓸 이름: **Agent**(`app/agent/nodes.py`+`graph.py`) →
+     **Orchestrator**(`app/agent/orchestrator.py`가 Agent 실행을 감쌈) → **Gateway**
+     (`app/gateway/data_gateway.py` + `app/services/llm/base.py`+`factory.py`)가 실제 외부
+     시스템(KRX/KIS/DART/네이버 뉴스/SOLAR/Gemini)과의 경계.
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+

@@ -2,11 +2,13 @@
 build_llm_input -> generate_analysis. See app/agent/nodes.py for what each step does and
 app/agent/state.py for the state shape.
 
-app/services/stock_analysis_service.analyze_date() imports get_graph() via a *local* import
-inside the function body, not at this module's top level — nodes.py imports
-stock_analysis_service, so importing this module from stock_analysis_service's top level would
-be circular. By the time analyze_date() actually runs, stock_analysis_service has already
-finished loading, so the local import just returns the cached module — see nodes.py's docstring.
+This compiled StateGraph is the Orchestrator in this project's Agent / Gateway / Orchestrator
+split — it's the thing that actually sequences the Agent's steps and threads state between
+them. app/agent/orchestrator.py just gives that role one name and one call site
+(run_analysis()); nothing here changes because of it.
+
+Callers should go through app/agent/orchestrator.run_analysis(), not get_graph() directly —
+that's the only reason orchestrator.py exists.
 """
 
 from langgraph.graph import END, StateGraph
