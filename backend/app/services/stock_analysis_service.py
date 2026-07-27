@@ -10,6 +10,7 @@ user-selectable SOLAR/Gemini toggle are untouched.
 
 import json
 import logging
+import time
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -346,16 +347,30 @@ def _generate_result(llm_input: LLMInputContext, provider_name: str | None) -> S
 
     last_error: Exception | None = None
     for attempt in range(1 + MAX_RETRIES):
+        started = time.perf_counter()
         try:
             raw = provider.generate(_SYSTEM_PROMPT, payload)
             parsed = json.loads(raw)
             result = StockAnalysisResult.model_validate(parsed)
-            return _sanitize_result(result, llm_input)
+            sanitized = _sanitize_result(result, llm_input)
+            logger.info(
+                "stock analysis LLM call succeeded (provider=%s, attempt=%d, latency_ms=%d)",
+                provider.name,
+                attempt + 1,
+                (time.perf_counter() - started) * 1000,
+            )
+            return sanitized
         except (LLMProviderError, json.JSONDecodeError, ValidationError) as exc:
             last_error = exc
-            logger.warning("stock analysis LLM call failed (attempt %d): %s", attempt + 1, exc)
+            logger.warning(
+                "stock analysis LLM call failed (provider=%s, attempt=%d, latency_ms=%d): %s",
+                provider.name,
+                attempt + 1,
+                (time.perf_counter() - started) * 1000,
+                exc,
+            )
 
-    logger.warning("Falling back to rule-based stock analysis: %s", last_error)
+    logger.warning("Falling back to rule-based stock analysis (provider=%s): %s", provider.name, last_error)
     return _fallback_result(llm_input)
 
 

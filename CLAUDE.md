@@ -727,6 +727,27 @@ graceful fallback) — 77개 전체 통과. 실제 API로 SK하이닉스 7/23 �
      **Orchestrator**(`app/agent/orchestrator.py`가 Agent 실행을 감쌈) → **Gateway**
      (`app/gateway/data_gateway.py` + `app/services/llm/base.py`+`factory.py`)가 실제 외부
      시스템(KRX/KIS/DART/네이버 뉴스/SOLAR/Gemini)과의 경계.
+5. **발표 스토리용 LLMOps/CI-CD 반영 상태 점검** — `gh run list`로 실제 GitHub Actions 실행
+   이력 확인:
+   - **CI(`ci.yml`)는 실제로 매 push/PR마다 통과 중** — 프론트(lint+build) / 백엔드(pytest) /
+     두 Docker 이미지 빌드(push 없이 빌드만) 3개 잡. 최근 실행들 전부 success.
+   - **Deploy(`deploy.yml`)는 매번 4단계(Authenticate to GCP)에서 실패** — GCP Workload
+     Identity Federation 시크릿이 아직 저장소에 설정 안 돼 있어서(`the GitHub Action workflow
+     must specify exactly one of "workload_identity_provider" or "credentials_json"`). 이건
+     버그가 아니라 4번(M4, GCE 배포)이 아직 실제로 준비 안 된 상태와 정확히 일치하는 예상된
+     실패 — 발표에서 "CI는 실제로 돌아가고 있고, CD는 GCE 설정을 마치면 바로 이어붙일 수
+     있는 상태"로 정직하게 얘기하는 게 맞음(실제로 성공한 것처럼 말하면 안 됨).
+   - **LLMOps 관측성 보강**: `stock_analysis_service._generate_result()`가 지금까지는 LLM 호출
+     실패 시에만 `logger.warning`을 남기고 성공 시엔 아무 로그도 안 남겼음(레이턴시도 전혀
+     기록 안 됨) — 발표에서 "LLM 호출을 모니터링한다"고 말하기엔 근거가 약했음. `time.perf_counter()`
+     로 매 시도의 레이턴시를 재고, 성공 시 `provider명/시도횟수/레이턴시(ms)`를 `logger.info`로,
+     실패·최종 폴백 시에도 같은 필드를 `logger.warning`으로 남기도록 보강함(새 의존성/대시보드
+     없음 — 표준 로깅만 추가, 나중에 Cloud Logging 등에서 그대로 조회 가능). 테스트 83개
+     회귀 없음.
+   - **의도적으로 안 한 것**: 실제 로그 수집·대시보드(Grafana/Cloud Logging 알림 등) 구축,
+     LLM 호출 비용/토큰 추적, A/B 테스트나 프롬프트 버저닝 시스템 — 이번 점검은 "지금 있는
+     로그로 발표에서 뭐라고 말할 수 있는지"를 정직하게 맞추는 수준으로 범위를 좁힘. Deploy
+     워크플로 자체를 고치는 것도 안 함(GCE 인프라 준비가 먼저 필요 — 4번 참고).
 
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
