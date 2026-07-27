@@ -35,6 +35,7 @@ export default function App() {
   // date, so picking a different minute after dismissing the popover would never bring it back.
   const [selectedIntradayIso, setSelectedIntradayIso] = useState<string | null>(null);
   const [pointCoordinate, setPointCoordinate] = useState<ChartCoordinate | null>(null);
+  const [hoverCoordinate, setHoverCoordinate] = useState<ChartCoordinate | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
   const chartWrapperResizeObserverRef = useRef<ResizeObserver | null>(null);
   // 2차 멘토링 피드백 반영: "차트 클릭 가능"을 첫 방문자에게 명확히 알림. 실제 클릭 한 번
@@ -135,6 +136,15 @@ export default function App() {
     document.getElementById(`source-${sourceId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  function handleChartMouseMove(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setHoverCoordinate({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  }
+
+  function handleChartMouseLeave() {
+    setHoverCoordinate(null);
+  }
+
   return (
     <TermPopoverProvider>
       <div className="page">
@@ -166,7 +176,12 @@ export default function App() {
                 <LoadingSpinner label="가격 데이터를 불러오는 중입니다..." />
               ) : (
                 <>
-                  <div className="price-chart__wrapper" ref={chartWrapperRef}>
+                  <div
+                    className="price-chart__wrapper"
+                    ref={chartWrapperRef}
+                    onMouseMove={handleChartMouseMove}
+                    onMouseLeave={handleChartMouseLeave}
+                  >
                     <PriceChart
                       prices={visiblePrices}
                       intradayPrices={intradayPrices}
@@ -177,8 +192,17 @@ export default function App() {
                       onSelectIntradayPoint={handleSelectIntradayPoint}
                       onSelectedPointCoordinate={setPointCoordinate}
                     />
-                    {!selectedPoint && (
-                      <div className="chart-hover-hint" aria-hidden="true">
+                    {!selectedPoint && hoverCoordinate && (
+                      <div
+                        className="chart-hover-hint"
+                        aria-hidden="true"
+                        style={{
+                          top: Math.max(8, hoverCoordinate.y - 32),
+                          ...(chartWidth > 0 && hoverCoordinate.x > chartWidth / 2
+                            ? { right: Math.max(8, chartWidth - hoverCoordinate.x + 12) }
+                            : { left: hoverCoordinate.x + 12 }),
+                        }}
+                      >
                         차트를 클릭하면 주가 변동 원인 후보와 오늘의 체크리스트가 보여요
                       </div>
                     )}

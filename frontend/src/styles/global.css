@@ -290,23 +290,14 @@ body {
 
 .chart-hover-hint {
   position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
   background: var(--color-text);
   color: var(--color-surface);
   padding: 6px 14px;
   border-radius: var(--radius-sm);
   font-size: 0.8rem;
   white-space: nowrap;
-  opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
   z-index: 5;
-}
-
-.price-chart__wrapper:hover .chart-hover-hint {
-  opacity: 1;
 }
 
 .chart-movement-popover {
