@@ -821,6 +821,65 @@ Orchestrator 리팩터·LLM 로깅과 이 세션의 embedding_client/retrieval_s
    발표 때 실제 URL이 필요하면 GitHub 저장소 시크릿이나 `gcloud compute instances list`로
    직접 확인할 것.
 
+## 17. LLMOps — POST /api/analysis/date에 난이도 기반 SOLAR/Gemini 라우팅 실제 구현 (2026-07-27,
+15번/16번과 같은 날, GCE 배포 확인 직후)
+
+**배경**: 15번에서 CI/CD(GCE 배포)와 LLM 호출 로깅까지 다뤘는데, 사용자가 이어서 "어려운
+작업은 solar pro, 쉬운 작업은 gemini flash로 라우팅해줘"라고 명시적으로 요청함. ⚠️ 이건
+9번에 기록된 **`/api/v1/explanations`(구 기능)의 자동 난이도 라우팅 논쟁과는 다른 대상**임—
+9번은 사용자가 SOLAR/Gemini 중 직접 고르는 토글 방식으로 세 번 확정한 그 엔드포인트 얘기고,
+이번 요청은 그보다 나중에 만들어진 `/api/analysis/date`(10번)의 LLM 호출 얘기임. 이 엔드포인트는
+애초에 사용자 선택 토글 자체가 없고(요청 스키마에 `llm_provider` 필드 없음) `settings.llm_provider`
+env var로 고정 provider만 썼었기 때문에, 여기에 자동 라우팅을 넣는 건 9번의 "사용자 선택 vs
+자동 라우팅" 논쟁을 다시 여는 게 아니라 애초에 아무 정책도 없던 자리에 처음 정책을 넣는 것.
+**9번의 결정은 전혀 안 건드림** — 혼동하지 말 것.
+
+**분류 기준 (`stock_analysis_service._select_provider()`)**:
+- **"쉬움" → Gemini(`gemini-flash-latest`)**: (a) `market_data.is_intraday`가 true인 경우(오늘
+  탭) — 프롬프트가 이미 방향 언급 자체를 금지하므로 방향-근거 일치 판단이 필요 없는 단순 사실
+  나열 작업, (b) 근거가 0~1건인 경우 — 여러 서사를 종합할 필요 없는 단일 항목 요약 수준.
+- **"어려움" → SOLAR(`solar-pro2`, `solar_client.MODEL` 재사용— 이미 Pro 모델이었음)**:
+  intraday가 아니면서 근거가 2건 이상인 경우 — 서로 다른 공시/뉴스 서사를 종합하면서 각각이
+  실제 등락 방향과 일치/모순되는지 판단해야 하는 진짜 추론 작업(11번에 이 판단을 잘못한 실제
+  버그가 기록돼 있음 — 근거가 많을수록 서로 모순될 여지도 커짐).
+- 사용자가 요청 시 provider를 명시하면(현재는 아무 호출 경로도 안 그러지만, 향후 토글이
+  생기면) 그 값이 분류 결과보다 항상 우선함 — `_generate_result(llm_input, provider_name)`이
+  `provider_name`이 `None`일 때만 `_select_provider()`를 탐.
+
+**Gemini provider 실제 구현**: `gemini_provider.py`가 10번 이후 계속 인터페이스만 있는 스텁
+(`raise LLMProviderError` 고정)이었음 — 라우팅이 "쉬움"으로 판단해도 항상 실패 후 SOLAR
+재시도/규칙 기반 폴백으로 새버렸을 것이므로 실제 호출을 구현함. `solar_provider.py`와 같은
+패턴(시스템 프롬프트 + JSON 컨텍스트 in, raw JSON string out, pydantic 검증은 호출부에서)을
+따르되 Gemini의 요청/응답 포맷(`systemInstruction`, `responseMimeType: application/json`)에
+맞춤 — `gemini_client.py`(구 기능용)의 `API_URL`/모델명 관련 노하우는 재사용하되 응답 스키마는
+새로 만듦(그쪽은 Factor 기반, 이쪽은 chart_card/detail_panel 기반이라 호환 안 됨).
+
+**실제로 발견한 버그 — 로깅이 전부 무음이었음**: 라우팅 결정을 로그로 확인하려고 실제 서버에
+요청을 보내봤는데 `logger.info()` 호출(15번에서 추가한 LLM 레이턴시 로그 포함)이 **하나도
+로그에 안 찍혔음**. 원인: `app/main.py` 어디에도 `logging.basicConfig()`가 없어서 루트 로거
+기본 레벨(WARNING)에 걸려 INFO 로그가 전부 조용히 버려지고 있었음 — `logger.warning()`(실패/
+폴백 케이스)만 우연히 보였던 것. `main.py`에 `logging.basicConfig(level=logging.INFO, ...)`
+추가로 고침. 고친 뒤 실제 서버로 재검증: 다중 근거·비-intraday 날짜(2026-07-21) → "LLMOps
+routing selected provider=solar" 로그 + 실제 SOLAR 호출 성공(레이턴시 ~4.4초), 오늘 날짜(intraday)
+→ "provider=gemini" 로그 + 실제 Gemini 호출 성공(레이턴시 ~12.4초, 이날은 오히려 더 느렸지만
+단일 호출의 네트워크 변동일 뿐 설계 문제 아님) — 둘 다 실제 키로 확인함.
+
+**검증**: 새 테스트 9개(`_select_provider` 분류 4개 + 명시적 override가 분류보다 우선하는지
+1개 + `GeminiProvider` 실제 호출/실패 경로 4개) 추가, 백엔드 테스트 97개(16번의 88개 + 9개)
+전부 통과. 실제 서버 기동해서 두 케이스 다 종단 검증(위 참고).
+
+**팀원 작업(16번) 병합**: 이 세션 도중 `git fetch`로 팀원 세션의 4개 커밋(디자인 토큰 시스템,
+로고, 임베딩 배치+공유 캐시로 응답속도 개선, 죽은 코드 제거)을 발견 — 이미 15번(이 세션의
+onboarding hint/hover hint)과 병합까지 끝내둔 상태라 순수 fast-forward로 받아옴(코드 충돌 없음).
+병합 후 프론트 lint/build, 백엔드 pytest(97개) 재검증 통과.
+
+⚠️ **MCP 관련 팀 내 불일치 — 사용자에게 다시 확인 필요**: 16번 세션 기록에 "MCP는 팀원이
+구현하기로 했다"는 전제가 있는데, 이 세션의 사용자는 오늘 "MCP 정도는 해볼 만하다고 해서
+무조건 구현할 거야"라고 말함 — 15번에서는 "이번엔 MCP 보류"로 확정했었으니, 이제 **세
+번째로 다른 이야기**가 나온 셈(9번의 LLM 라우팅 논쟁과 같은 패턴). 이 세션에서는 아직 MCP
+자체를 구현하지 않음(LLMOps 라우팅에 시간을 먼저 씀) — 다음에 MCP를 실제로 시작하기 전에
+반드시 팀 전체와 이 불일치를 확인할 것.
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
