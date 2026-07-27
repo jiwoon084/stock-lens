@@ -11,6 +11,7 @@ inventing evidence.
 import io
 import json
 import re
+import threading
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
@@ -348,14 +349,40 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(va, vb) / denom) if denom else 0.0
 
 
-@lru_cache(maxsize=256)
-def _cached_passage_embedding(text: str) -> tuple[float, ...]:
-    return tuple(embedding_client.embed_passage(text))
+# A click fires explain() and analyze() as two concurrent requests, each independently calling
+# get_related_documents() for the same (ticker, date, direction) — every disclosure/news title
+# was previously re-embedded one HTTP call at a time per request, so a single click could fire
+# dozens of sequential embedding calls. These two dicts are a process-wide cache keyed by exact
+# text (shared across every request, not just within one), and _embedding_lock coalesces
+# concurrent first-time lookups for the same text down to a single batched API call instead of
+# each request racing to embed it separately.
+_passage_embedding_cache: dict[str, list[float]] = {}
+_query_embedding_cache: dict[str, list[float]] = {}
+_embedding_lock = threading.Lock()
 
 
-@lru_cache(maxsize=64)
-def _cached_query_embedding(query: str) -> tuple[float, ...]:
-    return tuple(embedding_client.embed_query(query))
+def _get_query_embedding(query: str) -> list[float]:
+    cached = _query_embedding_cache.get(query)
+    if cached is not None:
+        return cached
+    with _embedding_lock:
+        cached = _query_embedding_cache.get(query)
+        if cached is None:
+            cached = embedding_client.embed_query(query)
+            _query_embedding_cache[query] = cached
+        return cached
+
+
+def _get_passage_embeddings(texts: tuple[str, ...]) -> list[list[float]]:
+    missing = [text for text in texts if text not in _passage_embedding_cache]
+    if missing:
+        with _embedding_lock:
+            missing = [text for text in missing if text not in _passage_embedding_cache]
+            if missing:
+                vectors = embedding_client.embed_passages(missing)
+                for text, vector in zip(missing, vectors):
+                    _passage_embedding_cache[text] = vector
+    return [_passage_embedding_cache[text] for text in texts]
 
 
 def _semantic_scores(query: str, texts: tuple[str, ...]) -> tuple[float, ...] | None:
@@ -363,19 +390,12 @@ def _semantic_scores(query: str, texts: tuple[str, ...]) -> tuple[float, ...] | 
     if not texts:
         return ()
     try:
-        query_vec = list(_cached_query_embedding(query))
+        query_vec = _get_query_embedding(query)
+        passage_vecs = _get_passage_embeddings(texts)
     except embedding_client.EmbeddingApiError:
         return None
 
-    scores = []
-    for text in texts:
-        try:
-            passage_vec = list(_cached_passage_embedding(text))
-        except embedding_client.EmbeddingApiError:
-            scores.append(0.0)
-            continue
-        scores.append(max(0.0, _cosine_similarity(query_vec, passage_vec)))
-    return tuple(scores)
+    return tuple(max(0.0, _cosine_similarity(query_vec, vec)) for vec in passage_vecs)
 
 
 def _date_proximity_score(delta_days: int) -> float:

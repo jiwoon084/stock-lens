@@ -40,9 +40,41 @@ def _embed(text: str, model: str) -> list[float]:
         raise EmbeddingApiError(f"Upstage embedding request failed: {exc}") from exc
 
 
+def _embed_batch(texts: list[str], model: str) -> list[list[float]]:
+    if not settings.solar_api_key:
+        raise EmbeddingApiError("SOLAR_API_KEY is not configured")
+
+    try:
+        response = requests.post(
+            API_URL,
+            headers={"Authorization": f"Bearer {settings.solar_api_key}"},
+            json={"input": texts, "model": model},
+            timeout=15,
+        )
+        response.raise_for_status()
+        # The OpenAI-compatible embeddings response carries an `index` per item — sorting by it
+        # guards against a provider returning entries out of input order, at negligible cost.
+        data = sorted(response.json()["data"], key=lambda item: item["index"])
+        return [item["embedding"] for item in data]
+    except Exception as exc:
+        raise EmbeddingApiError(f"Upstage embedding request failed: {exc}") from exc
+
+
 def embed_query(text: str) -> list[float]:
     return _embed(text, QUERY_MODEL)
 
 
 def embed_passage(text: str) -> list[float]:
     return _embed(text, PASSAGE_MODEL)
+
+
+def embed_passages(texts: list[str]) -> list[list[float]]:
+    """Batched form of embed_passage — one HTTP round trip for N texts instead of N.
+
+    retrieval_service reranks up to MAX_SOURCES-worth of disclosure/news candidates per
+    click, and that click fires two independent requests (explain + analyze); embedding each
+    candidate title one at a time was the dominant source of perceived latency.
+    """
+    if not texts:
+        return []
+    return _embed_batch(texts, PASSAGE_MODEL)

@@ -10,12 +10,12 @@ from app.services import embedding_client, retrieval_service
 def _reset_state():
     original_key = settings.solar_api_key
     settings.solar_api_key = ""
-    retrieval_service._cached_passage_embedding.cache_clear()
-    retrieval_service._cached_query_embedding.cache_clear()
+    retrieval_service._passage_embedding_cache.clear()
+    retrieval_service._query_embedding_cache.clear()
     yield
     settings.solar_api_key = original_key
-    retrieval_service._cached_passage_embedding.cache_clear()
-    retrieval_service._cached_query_embedding.cache_clear()
+    retrieval_service._passage_embedding_cache.clear()
+    retrieval_service._query_embedding_cache.clear()
 
 
 def _disclosure(rcept_no: str, rcept_dt: str, report_nm: str) -> dict:
@@ -42,11 +42,25 @@ def test_semantic_scores_none_without_key():
 def test_semantic_scores_computed_with_key():
     settings.solar_api_key = "test-key"
     with patch.object(embedding_client, "embed_query", return_value=[1.0, 0.0]), patch.object(
-        embedding_client, "embed_passage", return_value=[1.0, 0.0]
+        embedding_client, "embed_passages", return_value=[[1.0, 0.0]]
     ):
         scores = retrieval_service._semantic_scores("query", ("relevant text",))
 
     assert scores == (1.0,)
+
+
+def test_semantic_scores_batches_passages_in_one_call():
+    """N candidate texts must cost exactly one embed_passages call, not N — the whole point of
+    batching is collapsing per-click embedding latency from dozens of round trips to one.
+    """
+    settings.solar_api_key = "test-key"
+    with patch.object(embedding_client, "embed_query", return_value=[1.0, 0.0]), patch.object(
+        embedding_client, "embed_passages", return_value=[[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]]
+    ) as embed_passages:
+        scores = retrieval_service._semantic_scores("query", ("a", "b", "c"))
+
+    embed_passages.assert_called_once_with(["a", "b", "c"])
+    assert scores == (1.0, 0.0, 1.0)
 
 
 def test_hybrid_ranking_surfaces_semantically_relevant_disclosure_over_closer_dates(monkeypatch):
@@ -67,11 +81,11 @@ def test_hybrid_ranking_surfaces_semantically_relevant_disclosure_over_closer_da
     monkeypatch.setattr(retrieval_service, "_load_news_by_ticker", lambda: {"005930": _FILLER_NEWS})
     monkeypatch.setattr(retrieval_service, "_load_major_events_by_rcept_no", lambda: {})
 
-    def fake_embed_passage(text: str):
-        return [1.0, 0.0] if text == "자기주식처분 결정" else [0.0, 1.0]
+    def fake_embed_passages(texts: list[str]):
+        return [[1.0, 0.0] if text == "자기주식처분 결정" else [0.0, 1.0] for text in texts]
 
     with patch.object(embedding_client, "embed_query", return_value=[1.0, 0.0]), patch.object(
-        embedding_client, "embed_passage", side_effect=fake_embed_passage
+        embedding_client, "embed_passages", side_effect=fake_embed_passages
     ):
         sources = retrieval_service.get_related_documents("005930", "2026-07-15", "down")
 
