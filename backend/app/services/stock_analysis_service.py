@@ -1,6 +1,7 @@
 """Orchestrates POST /api/analysis/date: real market data + retrieval, backend-built candidate
-data (quick facts / watch items / available topics), one LLM call (SOLAR by default, see
-app/services/llm/factory.py) constrained to those candidates, then strict re-validation before
+data (quick facts / watch items / available topics), one LLM call — provider chosen by
+complexity-based routing (see _select_provider below; app/services/llm/factory.py just does the
+name -> instance lookup) — constrained to those candidates, then strict re-validation before
 anything reaches the frontend.
 
 This is a separate feature from app/services/explanation_service.py (POST /api/v1/explanations,
@@ -341,8 +342,37 @@ def _fallback_result(llm_input: LLMInputContext) -> StockAnalysisResult:
     return StockAnalysisResult(chart_card=chart_card, detail_panel=detail_panel)
 
 
+# LLMOps: complexity-based model routing (2nd mentoring feedback; CLAUDE.md section 16) — only
+# kicks in when the caller didn't force a provider. POST /api/analysis/date's request schema has
+# no per-request override field yet (unlike the older /api/v1/explanations feature's
+# user-selectable SOLAR/Gemini toggle, CLAUDE.md section 9 — this doesn't touch or replace that),
+# so in practice `provider_name` is always None from the real route today and this always runs.
+#
+# "Hard" -> solar ("solar-pro2", SolarProvider): reconciling 2+ evidence sources against the
+# actual price direction is a genuine reasoning task, not just summarizing — CLAUDE.md section 11
+# documents a real bug where getting a single source's direction-alignment wrong slipped through,
+# and multi-source cases have strictly more chances for one narrative to contradict another.
+# "Easy" -> gemini (gemini-flash, GeminiProvider): intraday requests only need neutral fact
+# listing — the prompt already bans all directional language for these, so there's no
+# direction-consistency judgment call to get right. Single-source (or no-source) cases are a
+# light single-item summary, not a multi-source reconciliation job either.
+_MULTI_SOURCE_THRESHOLD = 2
+
+
+def _select_provider(llm_input: LLMInputContext) -> str:
+    if llm_input.market_data.is_intraday:
+        return "gemini"
+    total_sources = len(llm_input.disclosures) + len(llm_input.news)
+    if total_sources < _MULTI_SOURCE_THRESHOLD:
+        return "gemini"
+    return "solar"
+
+
 def _generate_result(llm_input: LLMInputContext, provider_name: str | None) -> StockAnalysisResult:
-    provider = factory.get_provider(provider_name)
+    resolved_provider_name = provider_name or _select_provider(llm_input)
+    if provider_name is None:
+        logger.info("LLMOps routing selected provider=%s (auto, no override given)", resolved_provider_name)
+    provider = factory.get_provider(resolved_provider_name)
     payload = llm_input.model_dump()
 
     last_error: Exception | None = None

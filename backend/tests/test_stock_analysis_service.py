@@ -301,6 +301,51 @@ def test_volume_ratio_text_is_multiplier_not_percent_increase():
         assert "%" not in market_data.volume_comparison_text
 
 
+def test_select_provider_routes_multi_source_non_intraday_to_solar():
+    # _samsung_llm_input has 1 disclosure + 2 news = 3 sources, non-intraday.
+    llm_input = _samsung_llm_input()
+    assert stock_analysis_service._select_provider(llm_input) == "solar"
+
+
+def test_select_provider_routes_intraday_to_gemini_regardless_of_source_count():
+    llm_input = _samsung_llm_input()
+    intraday_market_data = llm_input.market_data.model_copy(update={"is_intraday": True})
+    llm_input = llm_input.model_copy(update={"market_data": intraday_market_data})
+
+    assert stock_analysis_service._select_provider(llm_input) == "gemini"
+
+
+def test_select_provider_routes_single_source_to_gemini():
+    llm_input = _samsung_llm_input()
+    llm_input = llm_input.model_copy(update={"news": []})  # leaves just the 1 disclosure
+
+    assert stock_analysis_service._select_provider(llm_input) == "gemini"
+
+
+def test_select_provider_routes_no_source_to_gemini():
+    llm_input = _samsung_llm_input()
+    llm_input = llm_input.model_copy(update={"disclosures": [], "news": []})
+
+    assert stock_analysis_service._select_provider(llm_input) == "gemini"
+
+
+def test_generate_result_explicit_provider_bypasses_auto_routing():
+    # _samsung_llm_input would auto-route to "solar" (multi-source, non-intraday) — an explicit
+    # override should still win.
+    llm_input = _samsung_llm_input()
+
+    from unittest.mock import Mock, patch
+
+    fake_provider = Mock()
+    fake_provider.name = "gemini"
+    fake_provider.generate = Mock(side_effect=stock_analysis_service.LLMProviderError("no key configured"))
+
+    with patch("app.services.stock_analysis_service.factory.get_provider", return_value=fake_provider) as mock_get_provider:
+        stock_analysis_service._generate_result(llm_input, "gemini")
+
+    mock_get_provider.assert_called_with("gemini")
+
+
 def test_analyze_date_endpoint_returns_valid_shape():
     ticker = market_data_service.SAMPLE_STOCKS[0].ticker
     selected_date = market_data_service.get_price_series(ticker)[-1].time
