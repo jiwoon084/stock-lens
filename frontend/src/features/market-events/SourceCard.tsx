@@ -1,9 +1,16 @@
+import { Badge, type BadgeTone } from "../../shared/components/Badge";
 import type { Source } from "../../shared/types/explanation";
 
 const TYPE_LABEL: Record<string, string> = {
   news: "뉴스",
   disclosure: "공시",
   report: "리포트",
+};
+
+const TYPE_TONE: Record<string, BadgeTone> = {
+  news: "accent",
+  disclosure: "positive",
+  report: "negative",
 };
 
 interface SourceCardProps {
@@ -17,7 +24,7 @@ export function SourceCard({ source }: SourceCardProps) {
   return (
     <a className="source-card" href={source.url} target="_blank" rel="noreferrer">
       <div className="source-card__meta">
-        <span className={`source-card__type source-card__type--${source.type}`}>{typeLabel}</span>
+        <Badge tone={TYPE_TONE[source.type] ?? "neutral"}>{typeLabel}</Badge>
         <span className="source-card__date">{publishedDate}</span>
       </div>
       <p className="source-card__title">{source.title}</p>

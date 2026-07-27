@@ -1,3 +1,4 @@
+import { ChangeValue } from "../../shared/components/ChangeValue";
 import type { PricePoint } from "../../shared/types/stock";
 
 interface SelectedPointInfoProps {
@@ -13,17 +14,11 @@ export function SelectedPointInfo({ point }: SelectedPointInfoProps) {
     );
   }
 
-  const changeClass =
-    point.change_percent > 0 ? "value--positive" : point.change_percent < 0 ? "value--negative" : "";
-
   return (
     <div className="selected-point-info">
       <span className="selected-point-info__date">{point.time}</span>
       <span className="selected-point-info__price">{point.close.toLocaleString()}원</span>
-      <span className={`selected-point-info__change ${changeClass}`}>
-        {point.change_percent > 0 ? "+" : ""}
-        {point.change_percent.toFixed(2)}%
-      </span>
+      <ChangeValue value={point.change_percent} showArrow={false} className="selected-point-info__change" />
       <span className="selected-point-info__volume">
         거래량 {point.volume.toLocaleString()} ({point.volume_change_percent > 0 ? "+" : ""}
         {point.volume_change_percent.toFixed(1)}%)

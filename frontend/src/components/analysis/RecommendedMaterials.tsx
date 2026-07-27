@@ -1,3 +1,4 @@
+import { Badge, type BadgeTone } from "../../shared/components/Badge";
 import { HighlightedText } from "../../shared/components/HighlightedText";
 import type { RecommendedMaterial, SourceMetadata } from "../../types/stockAnalysis";
 
@@ -5,6 +6,12 @@ const SOURCE_TYPE_LABEL: Record<SourceMetadata["source_type"], string> = {
   official_disclosure: "공시",
   market_data: "시장 데이터",
   media_report: "뉴스",
+};
+
+const SOURCE_TYPE_TONE: Record<SourceMetadata["source_type"], BadgeTone> = {
+  official_disclosure: "positive",
+  market_data: "neutral",
+  media_report: "accent",
 };
 
 interface RecommendedMaterialsProps {
@@ -27,11 +34,7 @@ export function RecommendedMaterials({ materials, sources }: RecommendedMaterial
             return (
               <li key={material.source_id} id={`source-${material.source_id}`} className="recommended-material-card">
                 <div className="recommended-material-card__meta">
-                  {source && (
-                    <span className={`recommended-material-card__type recommended-material-card__type--${source.source_type}`}>
-                      {SOURCE_TYPE_LABEL[source.source_type]}
-                    </span>
-                  )}
+                  {source && <Badge tone={SOURCE_TYPE_TONE[source.source_type]}>{SOURCE_TYPE_LABEL[source.source_type]}</Badge>}
                   {source?.published_at && (
                     <span className="recommended-material-card__date">{source.published_at.slice(0, 10)}</span>
                   )}

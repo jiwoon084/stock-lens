@@ -18,6 +18,7 @@ import { AnalysisDetailPanel } from "./components/analysis/AnalysisDetailPanel";
 import { useStockAnalysis } from "./components/analysis/useStockAnalysis";
 import { Card } from "./shared/components/Card";
 import { LoadingSpinner } from "./shared/components/LoadingSpinner";
+import { Logo } from "./shared/components/Logo";
 import { TermPopover } from "./shared/components/TermPopover";
 import { TermPopoverProvider } from "./shared/context/TermPopoverContext";
 import type { LlmProvider } from "./shared/types/explanation";
@@ -127,7 +128,10 @@ export default function App() {
     <TermPopoverProvider>
       <div className="page">
         <header className="app-topbar">
-          <span className="app-topbar__logo">Stock Lens</span>
+          <span className="app-topbar__logo">
+            <Logo className="app-topbar__logo-icon" />
+            Stock Lens
+          </span>
           <span className="app-topbar__tagline">차트에서 날짜를 선택하면 주가 변동 요인을 분석합니다</span>
         </header>
 

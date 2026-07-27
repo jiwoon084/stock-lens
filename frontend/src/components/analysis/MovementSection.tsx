@@ -1,3 +1,4 @@
+import { Badge, type BadgeTone } from "../../shared/components/Badge";
 import { HighlightedText } from "../../shared/components/HighlightedText";
 import { AnalysisCaution } from "./AnalysisCaution";
 import type { MovementItem, MovementStatus } from "../../types/stockAnalysis";
@@ -9,10 +10,23 @@ const STATUS_LABEL: Record<MovementStatus, string> = {
   not_found: "관련 자료를 찾지 못했어요",
 };
 
+const STATUS_TONE: Record<MovementStatus, BadgeTone> = {
+  confirmed: "positive",
+  reported: "accent",
+  uncertain: "neutral",
+  not_found: "neutral",
+};
+
 const EVIDENCE_TYPE_LABEL: Record<MovementItem["evidence_type"], string> = {
   official_disclosure: "회사 공식 공시",
   market_data: "시장 데이터",
   media_report: "언론 보도",
+};
+
+const EVIDENCE_TYPE_TONE: Record<MovementItem["evidence_type"], BadgeTone> = {
+  official_disclosure: "positive",
+  market_data: "accent",
+  media_report: "neutral",
 };
 
 interface MovementSectionProps {
@@ -34,12 +48,8 @@ export function MovementSection({ title, items, intradayNotice }: MovementSectio
           {items.map((item) => (
             <li key={item.title} className="movement-item">
               <div className="movement-item__heading">
-                <span className={`movement-item__evidence-tag movement-item__evidence-tag--${item.evidence_type}`}>
-                  {EVIDENCE_TYPE_LABEL[item.evidence_type]}
-                </span>
-                <span className={`movement-item__status movement-item__status--${item.status}`}>
-                  {STATUS_LABEL[item.status]}
-                </span>
+                <Badge tone={EVIDENCE_TYPE_TONE[item.evidence_type]}>{EVIDENCE_TYPE_LABEL[item.evidence_type]}</Badge>
+                <Badge tone={STATUS_TONE[item.status]}>{STATUS_LABEL[item.status]}</Badge>
               </div>
               <p className="movement-item__title">{item.title}</p>
               <p className="movement-item__description">

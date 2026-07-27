@@ -1,3 +1,4 @@
+import { ChangeValue } from "../../shared/components/ChangeValue";
 import type { PricePoint } from "../../shared/types/stock";
 
 interface EventCardProps {
@@ -7,10 +8,6 @@ interface EventCardProps {
 }
 
 export function EventCard({ point, selected, onSelect }: EventCardProps) {
-  const arrow = point.change_percent > 0 ? "▲" : point.change_percent < 0 ? "▼" : "-";
-  const changeClass =
-    point.change_percent > 0 ? "value--positive" : point.change_percent < 0 ? "value--negative" : "";
-
   return (
     <button
       type="button"
@@ -18,10 +15,7 @@ export function EventCard({ point, selected, onSelect }: EventCardProps) {
       onClick={() => onSelect(point)}
     >
       <span className="event-card__date">{point.time}</span>
-      <span className={`event-card__change ${changeClass}`}>
-        {arrow} {point.change_percent > 0 ? "+" : ""}
-        {point.change_percent.toFixed(2)}%
-      </span>
+      <ChangeValue value={point.change_percent} className="event-card__change" />
       <span className="event-card__volume">
         거래량 {point.volume_change_percent > 0 ? "+" : ""}
         {point.volume_change_percent.toFixed(1)}%
