@@ -749,6 +749,62 @@ graceful fallback) — 77개 전체 통과. 실제 API로 SK하이닉스 7/23 �
      로그로 발표에서 뭐라고 말할 수 있는지"를 정직하게 맞추는 수준으로 범위를 좁힘. Deploy
      워크플로 자체를 고치는 것도 안 함(GCE 인프라 준비가 먼저 필요 — 4번 참고).
 
+## 16. UI 디자인 토큰 시스템 정리 + 응답속도 개선 (2026-07-27, 15번과 같은 날 병렬 세션)
+
+15번과 같은 2차 멘토링 피드백을 놓고 **다른 세션이 동시에 겹치는 작업**을 진행했음 —
+`git fetch`로 뒤늦게 발견해서 병합함(merge commit, 충돌 3곳). 다음에 이 영역을 건드릴 때 왜
+`global.css`에 토큰 시스템과 `chart-onboarding-hint`/`chart-hover-hint`가 같이 있는지 헷갈리지
+않도록 정리:
+
+1. **UI/폰트 폴리시(15번 2항)를 훨씬 깊게 재작업**: 15번 세션이 폰트만 Pretendard로 바꾸고
+   토글 hover 하나를 추가한 수준이었다면, 이 세션은 `variables.css`에 실제 **디자인 토큰
+   체계**(font-size 8단계, font-weight 4단계, `--color-danger`, `--radius-full`, `--shadow-sm/md`,
+   `--spacing-2xl`)를 새로 만들고 `global.css` 전체(20개 넘게 흩어져 있던 임의 font-size 값)를
+   여기 맞춰 재작성함. 반복되던 배지 마크업(`source-card__type`/`recommended-material-card__type`/
+   `movement-item__evidence-tag` 등 4곳)을 `shared/components/Badge.tsx`로, 등락률 표시 중복
+   (`EventCard`/`SelectedPointInfo`)을 `shared/components/ChangeValue.tsx`로 통합.
+   **병합 시 충돌 3곳**(body의 font-family, `.chart-toolbar__button`의 font-size,
+   `.value--negative` 다음 블록) 전부 "토큰 유지 + 상대 세션이 추가한 기능(hover 상태,
+   `chart-onboarding-hint`/`chart-hover-hint`)은 그대로 살리되 그 안의 raw 값(1.1rem/0.85rem/
+   0.8rem 등)도 같은 토큰으로 치환"하는 방향으로 직접 수동 해결함 — 자동 병합 결과가 `.badge`
+   블록과 옛 `.error-banner`(positive 색)를 서로 엇갈리게 뒤섞어놔서 grep으로 재확인 후 다시
+   손으로 짜맞춤. 병합 후 프론트 tsc/build/lint, 백엔드 pytest 88개 전부 재검증 통과.
+2. **죽은 코드 제거 + 실버그 수정**: `AIAnalysisPanel.tsx`/`IssueChecklist.tsx`/
+   `ExplanationLoading.tsx`(App.tsx가 이미 안 쓰던 파일들, 4번 "폐기된 컴포넌트" 참고)를 실제로
+   삭제함. 이 죽은 코드가 정의하던 두 번째 `.glossary-term`(border-bottom dotted + cursor:
+   help)이 CSS 순서상 `HighlightedText.tsx`가 실제로 쓰는 첫 번째 정의(cursor: pointer)를
+   덮어쓰고 있던 실제 버그를 같이 고침.
+3. **로고 마크 추가**: 목업 3안(조리개 캔들 / 돋보기 스파크라인 / 시그널 닷 워드마크)을
+   아티팩트로 제시하고 사용자가 **B(돋보기+스파크라인)** 선택. `shared/components/Logo.tsx`
+   신규 + 상단바 워드마크 옆에 배치, `public/favicon.svg`로 브라우저 탭 아이콘도 교체(기존엔
+   `href="data:,"` 빈 플레이스홀더였음).
+4. **응답속도 — `explain()`/`analyze()` 중복 호출 자체가 아니라 그 아래 공유 병목을 수정**:
+   8번(10번? 아님, 위 7번 TODO 목록)에 오래 남아있던 "explain/analyze 중복 호출 통합" 항목을
+   실제로 프로파일링해보니, 두 요청은 이미 프론트에서 `void`로 동시에 나가고 있어 병렬 실행 중
+   이었음 — 진짜 병목은 `retrieval_service.get_related_documents()`가 공시/뉴스 후보 제목마다
+   SOLAR 임베딩 API를 **1건씩 순차 호출**하던 부분(클릭 한 번에 최대 수십 건의 순차 네트워크
+   왕복). `embedding_client.embed_passages()`(배치 임베딩, N번 호출→1번)를 추가하고,
+   `retrieval_service`의 텍스트별 `lru_cache`를 프로세스 전역 dict + `threading.Lock` 기반
+   캐시로 교체해 explain()/analyze() 두 요청이 같은 캐시를 공유하며 동시 첫 호출도 하나로
+   coalesce되게 함. **explain/analyze 두 기능 자체(스키마·프롬프트·엔드포인트)는 전혀 안
+   건드림** — 9번/10번에 명시된 "두 기능을 절대 섞지 말 것" 경계를 그대로 지킴. 배치 API가
+   실패하면 기존과 동일하게 날짜순 정렬로 폴백.
+5. **MCP — 이번에도 코드로는 구현 안 함**: 사용자가 "MCP는 팀원이 구현하기로 했다"고 해서
+   기존 서비스 로직(`stock_analysis_service.analyze_date()`/`retrieval_service.
+   get_related_documents()`)을 그대로 감싸는 tool 2개짜리 얇은 MCP 서버 설계만 논의함(stdio
+   전송, 새 비즈니스 로직 없음 — 데모 리스크 최소화 목적). ⚠️ **그런데 15번(같은 날 다른
+   세션)의 기록을 보면, 그 세션에서 이미 "MCP는 이번엔 보류하고 Agent/Gateway/Orchestrator
+   이름만 부여하는 선에서 그친다"고 사용자가 확정한 상태였음** — 즉 이 세션의 사용자와 15번의
+   사용자(또는 같은 사용자의 다른 시점 결정)가 MCP 여부에 대해 서로 다른 이야기를 하고 있었을
+   가능성이 있음. **다음 세션은 MCP를 실제로 시작하기 전에 반드시 이 불일치를 팀과 다시
+   확인할 것** — 9번(LLM 라우팅)에서 겪은 것과 같은 종류의 "세션마다 다른 답" 문제가 재발할
+   조짐임.
+
+**검증**: 병합 후 프론트 tsc/build/lint 전부 통과(경고 4개는 기존에도 있던 react-refresh
+관련 warning, 신규 아님), 백엔드 pytest **88개 전부 통과**(15번 세션의 Agent/Gateway/
+Orchestrator 리팩터·LLM 로깅과 이 세션의 embedding_client/retrieval_service 변경은 서로 다른
+파일이라 충돌 없었음).
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
@@ -819,7 +875,18 @@ Docker+GCE)의 인프라 패턴을 그대로 재사용하기로 확정함:
    내고, 그 결론을 이 문서에 "최종"이라고 못 박은 뒤에는 코드로만 반영하고 CLAUDE.md 재서술은
    하지 않는 쪽을 추천.
 8. `/api/analysis/date`(10번)의 남은 TODO: Gemini provider 실제 연결, 사용자 선택 토글 여부
-   결정, market_comparison_text용 KOSPI 지수 데이터 소스 확보, 그리고 `explain()`/`analyze()`
-   중복 호출 통합 검토. ~~`app/agent/` LangGraph 스켈레톤 채우기~~ → **완료**(11번 참고,
-   2026-07-23) — 단, `explain()`/`analyze()` 중복 호출 통합은 여전히 안 함(11번도 같은 한계
-   명시).
+   결정, market_comparison_text용 KOSPI 지수 데이터 소스 확보. ~~`app/agent/` LangGraph
+   스켈레톤 채우기~~ → **완료**(11번 참고, 2026-07-23). ~~`explain()`/`analyze()` 중복 호출
+   통합~~ → **16번에서 재검토 후 다른 방식으로 해결**: 두 요청은 이미 프론트에서 병렬로 나가고
+   있어 엔드포인트 자체를 합칠 필요는 없었고, 진짜 병목이던 `retrieval_service`의 순차 임베딩
+   호출을 배치+공유 캐시로 바꿔서 응답속도를 개선함(16번). explain()/analyze() 두 기능은
+   여전히 완전히 분리된 채로 유지됨(9번/10번 경계 그대로).
+9. ~~"차트 클릭 가능한지 모른다"(2차 멘토링 사용성 피드백)~~ → **완료**(15번,
+   `ChartOnboardingHint` + 차트 위 커서 추적 hover 힌트). 16번 세션이 별도로 시도했던
+   마커+캡션 조합은 이 해결책과 겹쳐서 사용자 요청으로 되돌렸음(구현했다가 revert된 상태라
+   코드에는 흔적 없음) — 다시 손댈 필요 없음.
+10. **MCP 적용 여부, 팀 내 확인 필요**: 15번 세션에서는 사용자가 "이번엔 MCP 보류, Agent/
+    Gateway/Orchestrator 이름만 부여"로 확정했는데, 16번 세션에서는 "MCP는 팀원이 구현하기로
+    했다"는 전제로 얇은 MCP 서버(tool 2개, 기존 서비스 로직 감싸기만) 설계를 논의함 — 실제
+    구현은 아직 없음. 두 기록이 서로 다른 전제라 **다음에 MCP를 실제로 시작하기 전에 반드시
+    팀과 다시 확인**할 것(9번에서 겪은 "세션마다 다른 결정" 패턴 반복 우려, 16번 참고).
