@@ -880,6 +880,55 @@ onboarding hint/hover hint)과 병합까지 끝내둔 상태라 순수 fast-forw
 자체를 구현하지 않음(LLMOps 라우팅에 시간을 먼저 씀) — 다음에 MCP를 실제로 시작하기 전에
 반드시 팀 전체와 이 불일치를 확인할 것.
 
+## 18. MCP 서버 실제 구현 (2026-07-29) — "기존 Gateway를 MCP 서버로 노출" 방향 채택
+
+17번에서 미뤄뒀던 MCP를 사용자가 "무조건 구현"하기로 재확정해서(17번의 팀 내 불일치는 이
+세션에서 별도로 해소되지 않음 — 여전히 권지운 쪽과 직접 맞춰본 기록은 없음) 실제로 구현함.
+전날 논의한 방향("기존 Gateway를 MCP 서버로 노출") 그대로: `backend/mcp_server.py` 하나 추가,
+새 비즈니스 로직 없이 기존 서비스 3개를 얇게 감싼 MCP 도구 3개만 노출.
+
+- `analyze_stock_movement(ticker, selected_date)` — `stock_analysis_service.analyze_date()` 그대로 호출.
+- `search_disclosures_and_news(ticker, selected_date)` — `data_gateway.get_related_documents()` 호출
+  (direction은 `data_gateway.get_price_series_with_live_today()`로 조회한 실제 등락으로 계산).
+- `get_price_series(ticker, limit=30)` — `market_data_service.get_price_series()`의 최근 N건.
+
+전송 방식은 stdio, 별도 진입점(`python mcp_server.py`)으로 실행 — FastAPI 앱(`app.main:app`)과
+완전히 분리되어 웹 서비스 자체에는 아무 영향 없음.
+
+⚠️ **실제로 겪은 사고 — `mcp` SDK를 `backend/.venv`에 그대로 설치했다가 앱이 즉시 깨짐**:
+`pip install mcp`를 기존 백엔드 가상환경에 설치했더니 `mcp`의 의존성(`sse-starlette` 등)이
+`starlette`를 0.38.6 → 1.3.1로, `pydantic-core`도 강제로 끌어올렸고, 그 결과
+`fastapi==0.115.0`이 요구하는 `starlette<0.39.0`과 충돌 — `from app.main import app`이
+`TypeError: Router.__init__() got an unexpected keyword argument 'on_startup'`로 즉시 깨지는 걸
+직접 재현함(다행히 로컬 venv에서만 벌어진 일이라 커밋·배포된 적은 없음). `pip uninstall`로
+되돌리려 했으나 이 환경의 `pip`(.exe 셔임) 자체가 조용히 아무 것도 안 하는 문제까지 겹쳐서
+`python -m pip uninstall`로 다시 시도해야 했음 — 이후 실제로 앱이 다시 임포트되고 테스트
+102개가 통과하는 것까지 확인 후에야 안전하다고 판단함.
+
+**해결**: `mcp`를 메인 앱과 완전히 분리된 별도 가상환경(`backend/.venv-mcp`,
+`backend/requirements-mcp.txt` = `-r requirements.txt` + `mcp`)에만 설치하기로 함 — MCP
+서버는 어차피 로컬 stdio 도구이고 배포된 웹 앱 안에서 절대 실행되지 않으므로, 두 venv가
+같은 `app/` 소스 트리를 공유하면서도 서로의 의존성을 건드리지 않는 구조. `.venv-mcp/`는
+`.gitignore`에 추가함.
+
+**테스트 격리도 같은 원칙으로**: `backend/tests/test_mcp_server.py`는 파일 맨 위에서
+`pytest.importorskip("mcp")`로 시작 — 메인 `backend/.venv`(CI가 쓰는 환경)에는 `mcp`가 없어서
+이 파일은 **실패가 아니라 스킵**됨(실제로 `.venv/python -m pytest` 돌려서 "102 passed, 1
+skipped"로 CI 영향 없음을 확인). `.venv-mcp/python -m pytest tests/test_mcp_server.py`로
+돌리면 실제로 4개 다 통과.
+
+**검증**: 실제 MCP 클라이언트(`mcp.client.stdio`)로 서버를 서브프로세스로 띄워 stdio
+프로토콜을 통해 3개 도구를 전부 실제 호출 — 실제 DART 공시 원문(자기주식처분결정 공시)이
+그대로 반환되는 것, 실제 LLM 분석(`LLMOps routing selected provider=solar` 로그까지 그대로
+찍힘)이 정상 동작하는 것, 존재하지 않는 티커에 `analyze_stock_movement` 호출 시
+`isError: true`로 정상적으로 에러가 전달되는 것까지 전부 확인함(단순 함수 목 테스트가 아니라
+실제 프로토콜 왕복으로 검증).
+
+**의도적으로 안 한 것**: FastAPI 앱 안에 SSE/HTTP transport로 통합하는 것 — stdio + 별도
+진입점이 이미 배포된 웹 서비스에 아무 리스크도 안 주는 구조라 이번엔 그대로 둠. Claude
+Desktop 연동은 README에 설정 방법만 적어두고 실제 연결 테스트는 사용자가 로컬에서 직접
+확인해야 함(이 세션은 Claude Desktop 앱 자체에 접근할 수 없음).
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+

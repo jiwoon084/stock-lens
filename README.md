@@ -116,6 +116,29 @@ npm run lint
 npm run build
 ```
 
+## MCP 서버 (선택)
+
+`backend/mcp_server.py`는 Stock Lens의 분석 기능(`analyze_stock_movement`,
+`search_disclosures_and_news`, `get_price_series`)을 MCP(Model Context Protocol) 도구로 노출해,
+Claude Desktop 등 외부 MCP 클라이언트가 직접 호출할 수 있게 합니다. 웹 앱과 완전히 분리된
+별도 진입점이며, main 앱(`app.main:app`)에는 영향을 주지 않습니다.
+
+`mcp` SDK의 의존성(starlette 등 최신 버전 요구)이 FastAPI 0.115.0의 고정 버전과 충돌해서,
+반드시 별도 가상환경(`backend/.venv-mcp`)에 설치해야 합니다 — `backend/.venv`에는 설치하지
+마세요.
+
+```bash
+cd backend
+python -m venv .venv-mcp
+.venv-mcp/Scripts/python.exe -m pip install -r requirements-mcp.txt   # Windows
+# source .venv-mcp/bin/activate && pip install -r requirements-mcp.txt   # macOS/Linux
+
+.venv-mcp/Scripts/python.exe mcp_server.py
+```
+
+Claude Desktop에 연결하려면 `claude_desktop_config.json`의 `mcpServers`에 위 명령(`command`/
+`args`/`cwd`)을 등록하면 됩니다.
+
 ## 환경변수 설정
 
 `.env.example`을 복사해 `.env`로 사용하세요 (`.env`는 git에 커밋되지 않습니다).

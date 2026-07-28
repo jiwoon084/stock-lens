@@ -1,0 +1,4 @@
+# Installs into backend/.venv-mcp, NOT the main backend/.venv — see mcp_server.py's docstring
+# for why: the mcp SDK's own dependencies conflict with FastAPI's pinned starlette version.
+-r requirements.txt
+mcp>=1.0.0
