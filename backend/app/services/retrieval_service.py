@@ -372,19 +372,30 @@ _embedding_lock = threading.Lock()
 _CACHE_VERSION = f"{embedding_client.QUERY_MODEL}|{embedding_client.PASSAGE_MODEL}"
 
 
-def _cache_file_path() -> Path:
+def _cache_file_path() -> Path | None:
+    """None if the cache directory can't be created/used (e.g. no volume mounted for it and the
+    container's non-root user can't create one under /app — reproduced for real on the deployed
+    container: /app is root-owned, so `appuser` can't mkdir a new child of it without an existing,
+    already-writable mount point there). Every caller must treat None as "persistence is
+    unavailable right now" and fall back to in-memory-only — this is a speed optimization, never
+    allowed to take the whole app down over a filesystem permission it doesn't control.
+    """
     here = Path(__file__).resolve()
     root = next((p for p in here.parents[:6] if (p / "data").is_dir()), here.parents[2])
     cache_dir = root / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Embedding cache directory unavailable (%s) — caching in-memory only: %s", cache_dir, exc)
+        return None
     return cache_dir / "embeddings.json"
 
 
 def _load_embedding_cache_from_disk() -> None:
-    path = _cache_file_path()
-    if not path.exists():
-        return
     try:
+        path = _cache_file_path()
+        if path is None or not path.exists():
+            return
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("version") != _CACHE_VERSION:
             logger.info("Embedding cache on disk is for a different model, ignoring: %s", path)
@@ -396,26 +407,36 @@ def _load_embedding_cache_from_disk() -> None:
             len(_passage_embedding_cache), len(_query_embedding_cache),
         )
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("Failed to load embedding cache from disk (%s), starting empty: %s", path, exc)
+        logger.warning("Failed to load embedding cache from disk, starting empty: %s", exc)
 
 
 def _save_embedding_cache_to_disk() -> None:
-    path = _cache_file_path()
-    payload = {
-        "version": _CACHE_VERSION,
-        "queries": _query_embedding_cache,
-        "passages": _passage_embedding_cache,
-    }
     try:
+        path = _cache_file_path()
+        if path is None:
+            return
+        payload = {
+            "version": _CACHE_VERSION,
+            "queries": _query_embedding_cache,
+            "passages": _passage_embedding_cache,
+        }
         # Round to 6 decimals on write only — plenty of precision for cosine-similarity ranking,
         # keeps the file from growing several times larger than it needs to for no real benefit.
         text = json.dumps(payload, default=lambda v: round(v, 6))
         path.write_text(text, encoding="utf-8")
     except OSError as exc:
-        logger.warning("Failed to save embedding cache to disk (%s): %s", path, exc)
+        logger.warning("Failed to save embedding cache to disk: %s", exc)
 
 
-_load_embedding_cache_from_disk()
+# Module-level, so it runs the moment this module is first imported (see main.py's comment on
+# import ordering) — must never raise, or it takes the whole app down at startup over what's
+# only ever a speed optimization. _load_embedding_cache_from_disk() already catches everything
+# it knows how to hit; this is a last-resort net in case the filesystem misbehaves in some way
+# neither of us has thought of yet.
+try:
+    _load_embedding_cache_from_disk()
+except Exception:  # noqa: BLE001 — intentionally broad, see comment above
+    logger.exception("Unexpected error loading embedding cache from disk — starting empty")
 
 
 def _get_query_embedding(query: str) -> list[float]:
