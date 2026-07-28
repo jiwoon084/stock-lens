@@ -1,0 +1,82 @@
+name: Refresh Data
+
+# data/disclosures.json covers a rolling DAYS_BACK-day window computed from "today" at collection
+# time, and data/news.json is always just a snapshot of whatever day Naver's search API considers
+# "today" (it has no historical-date filter — see data/step5_news.py's docstring/CLAUDE.md) —
+# neither self-updates, so both go stale every day nobody reruns the collection scripts by hand.
+# This runs that same pipeline daily and ships the result to the deployed GCE VM, then restarts
+# the backend so it actually picks up the new files (they're loaded once into an in-process
+# cache — see retrieval_service.py's @lru_cache loaders — and won't be re-read until restart).
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 06:00 KST
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install script dependencies
+        run: pip install requests python-dotenv
+
+      - name: Fetch corp codes
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python data/step1_corpcode.py
+
+      - name: Fetch disclosures
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python data/step2_disclosures.py
+
+      - name: Fetch news
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: python data/step5_news.py
+
+      - name: Copy refreshed data to GCE VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USERNAME }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          source: "data/disclosures.json,data/news.json"
+          target: "~/stock-lens/data"
+          strip_components: 1
+
+      - name: Restart backend so it reloads the new data
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USERNAME }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/stock-lens
+            docker compose restart backend
+
+            for i in $(seq 1 10); do
+              if curl -sf http://127.0.0.1:8001/health > /dev/null; then
+                echo "Backend healthy after restart"
+                break
+              fi
+              echo "Waiting for backend... ($i)"
+              sleep 5
+              if [ "$i" = "10" ]; then
+                echo "Backend health check failed after restart"
+                exit 1
+              fi
+            done
