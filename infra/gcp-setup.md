@@ -18,10 +18,16 @@ firewall.
 ## 2. Place the compose file, env, and data on the VM
 
 ```bash
-ssh <username>@<vm-external-ip> "mkdir -p ~/stock-lens/data"
+ssh <username>@<vm-external-ip> "mkdir -p ~/stock-lens/data ~/stock-lens/cache"
 scp infra/gce/docker-compose.yml <username>@<vm-external-ip>:~/stock-lens/docker-compose.yml
 scp .env <username>@<vm-external-ip>:~/stock-lens/.env   # real values, based on infra/gce/.env.example's shape
 scp data/*.json <username>@<vm-external-ip>:~/stock-lens/data/
+
+# The backend container runs as a non-root user whose UID doesn't match any user on the VM
+# host, so it can't write into a bind-mounted directory owned by <username> — reproduced for
+# real (PermissionError writing retrieval_service.py's embedding cache) and confirmed this fixes
+# it. Only holds a regenerable cache, not anything sensitive, so world-writable is fine here.
+ssh <username>@<vm-external-ip> "chmod 777 ~/stock-lens/cache"
 ```
 
 ## 3. Register GitHub repository Secrets

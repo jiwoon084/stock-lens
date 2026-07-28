@@ -1004,6 +1004,41 @@ from disk...`)가 서버 기동 시 전혀 안 찍혀서 확인해보니, `main.
 시나리오가 됨: `docker compose restart`(이미지 재빌드 없이 컨테이너만 재시작)는 바인드 마운트인
 `cache/`를 건드리지 않으므로, 매일 자동 재시작 이후에도 임베딩 캐시가 그대로 유지됨.
 
+⚠️ **바로 이어서 실제 장애로 이어짐 — 배포 직후 사이트가 완전히 죽음**: 위 커밋을 push하자마자
+Deploy 워크플로의 헬스체크가 실패했고, SSH로 들어가서 `docker compose logs backend`를 직접
+확인해보니 **`PermissionError: [Errno 13] Permission denied: '/app/cache'`**로 컨테이너가
+계속 재시작 루프에 빠져 있었음 — 즉 이 세션에서 만든 기능이 실제로 배포된 서비스를 다운시킨
+것. 원인: `Dockerfile`이 `USER appuser`로 전환하는데, `/app`은 그 전 단계(`WORKDIR`/`COPY`)에서
+root 소유로 만들어졌기 때문에 `appuser`가 `/app` 밑에 새 디렉터리(`mkdir /app/cache`)를 만들
+권한이 없었음. 게다가 이 시점엔 VM에 있던 실제 `docker-compose.yml`이 아직 예전 버전이라
+`cache/` 볼륨 마운트 자체가 없었던 것도 겹침(`deploy.yml`은 이미지만 pull하지 저장소의
+compose 파일을 VM에 동기화하진 않음 — `infra/gcp-setup.md`에 이미 이렇게 설계돼 있었음을
+재확인). **모듈 최상단에서 실행되는 캐시 로드 코드가 예외를 던지면 앱 전체가 임포트 단계에서
+죽는다는 걸 실제 장애로 직접 겪음**.
+
+**수정**: (1) `retrieval_service._cache_file_path()`가 `mkdir` 실패 시 예외를 던지는 대신
+`None`을 반환하도록 바꾸고, 호출하는 쪽(모듈 최상단의 로드 호출 포함) 전부 `None`이면 "이번엔
+디스크 영속화 없이 인메모리로만 동작"하도록 처리 — 캐싱 최적화 하나가 앱 전체를 죽여선 안
+된다는 원칙을 명확히 지키게 함. (2) `Dockerfile`이 `USER appuser`로 전환하기 전에 미리
+`mkdir -p /app/cache && chown appuser:appuser`를 실행하도록 추가 — 볼륨이 없어도(임시로) 또는
+제대로 마운트됐을 때 실제로 쓸 수 있게 함. **이번엔 pytest만 믿지 않고 실제로 이미지를 빌드해서
+볼륨 없이 컨테이너를 띄워 직접 재현·검증**(로컬 venv 테스트로는 이 문제를 못 잡았음 — Windows
+호스트에선 이 권한 문제 자체가 없어서 놓쳤던 것).
+
+**VM에서 한 겹 더 발견한 문제**: 위 수정을 배포해 사이트를 살린 뒤, VM의 실제
+`docker-compose.yml`도 `cache/` 마운트가 있는 최신 버전으로 SCP로 교체했더니, 이번엔
+컨테이너 안에서 mkdir 자체는 성공하지만 **`/app/cache/embeddings.json` 쓰기가 다시
+`Permission denied`** — 컨테이너 내부 `appuser`의 UID/GID가 VM 호스트에 새로 `mkdir`한
+`~/stock-lens/cache` 디렉터리(호스트 사용자 소유)와 안 맞아서였음. `chmod 777
+~/stock-lens/cache`로 해결(캐시일 뿐 민감 데이터가 아니라 world-writable로 문제 없다고 판단) —
+`infra/gcp-setup.md`의 1회성 설정 절차에 이 단계를 추가함. 이후 재시작 시 실제로
+`Loaded embedding cache from disk: 20 passages, 1 queries` 로그로 정상 영속화까지 최종 확인.
+
+**교훈**: 로컬 pytest 통과가 "배포해도 안전하다"를 보장하지 않음 — 이번 사고의 원인
+(비-root 컨테이너 사용자의 파일시스템 권한)은 Windows 호스트에서 돌리는 pytest로는 절대 못
+잡는 종류였음. 다음에 파일시스템에 새로 쓰기 로직을 추가할 땐, 실제로 이미지를 빌드해
+컨테이너로 띄워보고(가능하면 볼륨 마운트 없는 경우까지) 검증할 것.
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
