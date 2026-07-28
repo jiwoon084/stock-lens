@@ -929,6 +929,37 @@ skipped"로 CI 영향 없음을 확인). `.venv-mcp/python -m pytest tests/test_
 Desktop 연동은 README에 설정 방법만 적어두고 실제 연결 테스트는 사용자가 로컬에서 직접
 확인해야 함(이 세션은 Claude Desktop 앱 자체에 접근할 수 없음).
 
+## 19. 공시·뉴스 데이터 자동 최신화 + 보안 하드닝 (2026-07-28)
+
+**배경**: DB가 없다는 걸 사용자에게 설명하다가, `data/disclosures.json`(2026-07-20에 받아둔
+4/22~7/16 창)과 `data/news.json`(네이버 뉴스 API는 과거 날짜 검색이 안 돼서 항상 "수집한
+그날" 하루치만 존재, 7/22 하루치만 있었음)이 실제로 오늘(7/28) 기준 최근 날짜엔 텅 비어있는
+걸 직접 파일을 열어 확인함 — "오늘 탭 클릭하면 관련 자료 없음"의 진짜 원인.
+
+1. **수동 최신화**: `data/step2_disclosures.py`/`step5_news.py` 재실행 → disclosures.json
+   7/28 기준 365일 창(4,947건)으로, news.json도 7/28 하루치(100건)로 갱신. 백엔드 테스트
+   102 passed/1 skipped 재확인.
+2. **매일 자동 최신화(`​.github/workflows/refresh-data.yml`, 신규)**: step1(corp_codes)→
+   step2(disclosures)→step5(news)를 매일 06:00 KST에 GitHub Actions에서 실행 → 결과물을
+   `deploy.yml`이 이미 쓰던 SSH 시크릿(`GCE_HOST`/`GCE_USERNAME`/`GCE_SSH_KEY`) 그대로 재사용해
+   GCE VM의 `~/stock-lens/data/`로 전송 → **백엔드 재시작까지 자동 실행**(`retrieval_service.py`
+   의 파일 로더가 `@lru_cache(maxsize=1)`라 파일만 바꿔선 재시작 전까지 이전 데이터를 계속
+   기억하고 있어서, 이 단계 빠뜨리면 자동화가 무의미해짐 — 실제로 이 점을 고려해서 넣음).
+   `DART_API_KEY`/`NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`을 새 GitHub Secrets로 추가함(기존엔
+   로컬 `.env`에만 있었음). `workflow_dispatch`로 수동 트리거해 전체 파이프라인(코드 수집→
+   전송→백엔드 재시작→헬스체크)이 실제로 6분여만에 끝까지 성공하는 것까지 확인함(실행
+   30331661494). `major_events.json`(구조화 발췌, step3)은 이번 자동화 범위에 포함 안 함 —
+   빠져도 `_fetch_document_excerpt`가 document.xml 원문 파싱으로 그대로 대체하므로 안전.
+3. **배포된 API 보안 하드닝** (배포 주소가 실제로 공개되면서 나온 질문에 대응):
+   - `backend/app/core/rate_limit.py` 신규 — IP당 분당 10회로 `/api/v1/explanations`,
+     `/api/analysis/date`(둘 다 무인증+유료 LLM 호출) 제한, 넘으면 429 + Retry-After.
+   - `ENABLE_API_DOCS` 설정 추가 — 로컬 기본 true, 배포(`infra/gce/.env.example`)는 false로
+     Swagger/ReDoc/OpenAPI 스키마 비공개.
+   - CORS `allow_credentials`를 false로(이 앱엔 쿠키/세션 자체가 없어서 켤 이유가 없었음).
+   - SSH(22번 포트) 방화벽 소스 IP 제한은 GCP 콘솔 설정이라 코드로 못 고침 — 팀에 별도 확인
+     필요 항목으로 남김.
+   - 백엔드 테스트 102개 전부 통과(신규 rate-limit/docs/CORS 테스트 5개 포함).
+
 ## 5. 기술 스택 확정 사항 (2026-07-20) — 이전 프로젝트(MathMate) 자산 재사용
 
 이전 수업 프로젝트 **MathMate**(`...생성형 AI 에이전트\MathMate`, LangGraph+FastAPI+Supabase+
