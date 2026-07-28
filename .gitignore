@@ -36,6 +36,9 @@ data/vector_store/
 data/generated/
 *.sqlite3
 
+# Persisted embedding cache (retrieval_service.py) — regenerable, not curated data
+/cache/
+
 # Archives
 *.zip
 

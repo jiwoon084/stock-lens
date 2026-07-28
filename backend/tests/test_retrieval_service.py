@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -33,6 +34,51 @@ _FILLER_NEWS = [
     _news("필러 뉴스 A", "Tue, 14 Jul 2026 09:00:00 +0900"),
     _news("필러 뉴스 B", "Mon, 13 Jul 2026 09:00:00 +0900"),
 ]
+
+
+def test_embedding_cache_persists_across_a_simulated_restart(tmp_path, monkeypatch):
+    cache_file = tmp_path / "embeddings.json"
+    monkeypatch.setattr(retrieval_service, "_cache_file_path", lambda: cache_file)
+    settings.solar_api_key = "test-key"
+
+    with patch.object(embedding_client, "embed_passages", return_value=[[1.0, 0.0]]) as embed_passages:
+        retrieval_service._get_passage_embeddings(("a",))
+    embed_passages.assert_called_once()
+    assert cache_file.exists()
+
+    # Simulate a process restart: in-memory cache gone, reload from the file just written.
+    retrieval_service._passage_embedding_cache.clear()
+    retrieval_service._query_embedding_cache.clear()
+    retrieval_service._load_embedding_cache_from_disk()
+
+    with patch.object(embedding_client, "embed_passages") as embed_passages_after_reload:
+        result = retrieval_service._get_passage_embeddings(("a",))
+
+    embed_passages_after_reload.assert_not_called()  # served from the reloaded disk cache
+    assert result == [[1.0, 0.0]]
+
+
+def test_embedding_cache_ignored_when_model_version_differs(tmp_path, monkeypatch):
+    cache_file = tmp_path / "embeddings.json"
+    cache_file.write_text(
+        json.dumps({"version": "some-other-model", "queries": {}, "passages": {"a": [9.0]}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(retrieval_service, "_cache_file_path", lambda: cache_file)
+
+    retrieval_service._load_embedding_cache_from_disk()
+
+    assert "a" not in retrieval_service._passage_embedding_cache
+
+
+def test_embedding_cache_load_survives_a_corrupt_file(tmp_path, monkeypatch):
+    cache_file = tmp_path / "embeddings.json"
+    cache_file.write_text("not valid json", encoding="utf-8")
+    monkeypatch.setattr(retrieval_service, "_cache_file_path", lambda: cache_file)
+
+    retrieval_service._load_embedding_cache_from_disk()  # must not raise
+
+    assert retrieval_service._passage_embedding_cache == {}
 
 
 def test_semantic_scores_none_without_key():

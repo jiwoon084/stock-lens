@@ -15,6 +15,7 @@ services:
       - KRX_API_KEY=${KRX_API_KEY:-}
     volumes:
       - ./data:/app/data:ro
+      - ./cache:/app/cache
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s

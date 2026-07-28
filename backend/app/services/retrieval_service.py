@@ -10,6 +10,7 @@ inventing evidence.
 
 import io
 import json
+import logging
 import re
 import threading
 import zipfile
@@ -26,6 +27,8 @@ import requests
 from app.core.config import settings
 from app.schemas.explanation import Source
 from app.services import embedding_client
+
+logger = logging.getLogger(__name__)
 
 DOCUMENT_URL = "https://opendart.fss.or.kr/api/document.xml"
 EXCERPT_LENGTH = 400
@@ -356,9 +359,63 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 # text (shared across every request, not just within one), and _embedding_lock coalesces
 # concurrent first-time lookups for the same text down to a single batched API call instead of
 # each request racing to embed it separately.
+#
+# Also persisted to disk (_cache_file_path) so a redeploy/restart doesn't throw away every
+# embedding computed so far and re-pay for them one batch at a time — SOLAR embedding calls are
+# the same kind of repeated network cost this cache already existed to avoid, just across
+# process lifetimes instead of within one. Deliberately NOT in data/: that directory is mounted
+# read-only in Docker (see compose.yaml / infra/gce/docker-compose.yml) since it holds the
+# curated DART/news snapshot, which request-time writes shouldn't touch.
 _passage_embedding_cache: dict[str, list[float]] = {}
 _query_embedding_cache: dict[str, list[float]] = {}
 _embedding_lock = threading.Lock()
+_CACHE_VERSION = f"{embedding_client.QUERY_MODEL}|{embedding_client.PASSAGE_MODEL}"
+
+
+def _cache_file_path() -> Path:
+    here = Path(__file__).resolve()
+    root = next((p for p in here.parents[:6] if (p / "data").is_dir()), here.parents[2])
+    cache_dir = root / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / "embeddings.json"
+
+
+def _load_embedding_cache_from_disk() -> None:
+    path = _cache_file_path()
+    if not path.exists():
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("version") != _CACHE_VERSION:
+            logger.info("Embedding cache on disk is for a different model, ignoring: %s", path)
+            return
+        _query_embedding_cache.update(payload.get("queries", {}))
+        _passage_embedding_cache.update(payload.get("passages", {}))
+        logger.info(
+            "Loaded embedding cache from disk: %d passages, %d queries",
+            len(_passage_embedding_cache), len(_query_embedding_cache),
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load embedding cache from disk (%s), starting empty: %s", path, exc)
+
+
+def _save_embedding_cache_to_disk() -> None:
+    path = _cache_file_path()
+    payload = {
+        "version": _CACHE_VERSION,
+        "queries": _query_embedding_cache,
+        "passages": _passage_embedding_cache,
+    }
+    try:
+        # Round to 6 decimals on write only — plenty of precision for cosine-similarity ranking,
+        # keeps the file from growing several times larger than it needs to for no real benefit.
+        text = json.dumps(payload, default=lambda v: round(v, 6))
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Failed to save embedding cache to disk (%s): %s", path, exc)
+
+
+_load_embedding_cache_from_disk()
 
 
 def _get_query_embedding(query: str) -> list[float]:
@@ -370,6 +427,7 @@ def _get_query_embedding(query: str) -> list[float]:
         if cached is None:
             cached = embedding_client.embed_query(query)
             _query_embedding_cache[query] = cached
+            _save_embedding_cache_to_disk()
         return cached
 
 
@@ -382,6 +440,7 @@ def _get_passage_embeddings(texts: tuple[str, ...]) -> list[list[float]]:
                 vectors = embedding_client.embed_passages(missing)
                 for text, vector in zip(missing, vectors):
                     _passage_embedding_cache[text] = vector
+                _save_embedding_cache_to_disk()
     return [_passage_embedding_cache[text] for text in texts]
 
 

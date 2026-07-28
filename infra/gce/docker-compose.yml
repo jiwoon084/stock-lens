@@ -24,6 +24,10 @@ services:
       # the image — this directory is placed on the VM once, out of band, and just needs to
       # persist across deploys. See ../gcp-setup.md.
       - ./data:/app/data:ro
+      # Read-write, unlike ./data above — persists retrieval_service.py's on-disk embedding
+      # cache across container restarts/redeploys instead of re-paying for every SOLAR
+      # embedding call from scratch each time. Created automatically on first run.
+      - ./cache:/app/cache
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s
